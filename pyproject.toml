@@ -1,0 +1,98 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "voiceblender"
+version = "1.0.0"
+description = "Python client for the VoiceBlender API"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Messageroute Ltd" }]
+keywords = ["voiceblender", "sip", "webrtc", "voice", "telephony"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Telephony",
+    "Typing :: Typed",
+]
+dependencies = [
+    "httpx>=0.27",
+    "websockets>=13",
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "ruamel.yaml>=0.18",
+]
+
+[project.urls]
+Homepage = "https://voiceblender.com"
+Repository = "https://github.com/VoiceBlender/voiceblender-python"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voiceblender"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.ruff.lint.per-file-ignores]
+"src/voiceblender/_models.py" = ["N815"]    # generated: wire-name aliases via Field()
+"src/voiceblender/_requests.py" = ["N815"]
+"src/voiceblender/_responses.py" = ["N815"]
+"src/voiceblender/_events.py" = ["N815"]
+"src/voiceblender/_vsi.py" = ["N815"]
+"tests/*" = ["N802", "N803"]
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+plugins = ["pydantic.mypy"]
+exclude = ["build/", "dist/"]
+
+[[tool.mypy.overrides]]
+module = ["websockets.*", "ruamel.*"]
+ignore_missing_imports = true
+
+# Generated modules dynamically bind methods onto Client/Leg/Room/EventStream
+# at import time. Strict mypy flags every binding as ``attr-defined`` because
+# the receiver class doesn't statically declare the method. Relax the affected
+# checks for generated files only — matches the Go SDK's posture of running
+# vet on generated files but accepting that the dynamic emission idioms
+# don't pass an aggressive linter.
+[[tool.mypy.overrides]]
+module = [
+    "voiceblender._legs",
+    "voiceblender._rooms",
+    "voiceblender._webrtc",
+    "voiceblender._vsi",
+]
+disable_error_code = [
+    "attr-defined",
+    "method-assign",
+    "unused-ignore",
+    "no-any-return",
+    "type-arg",
+    "assignment",
+    "misc",
+]
