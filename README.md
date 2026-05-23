@@ -1,5 +1,13 @@
 # voiceblender-python
 
+> [!IMPORTANT]
+> **This library is auto-generated.** Models, request/response/event types, and
+> method bindings are produced by `tools/generate.py` from the OpenAPI/AsyncAPI
+> specs (see [Code generation](#code-generation)). Do **not** edit the generated
+> sources directly — your changes will be overwritten on the next run. Open pull
+> requests against the generator (`tools/generate.py`) and/or the upstream specs
+> only.
+
 Python client for the [VoiceBlender](https://voiceblender.com) API.
 
 VoiceBlender bridges SIP and WebRTC voice calls with multi-party audio mixing,
