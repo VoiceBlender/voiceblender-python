@@ -77,6 +77,8 @@ class WebhookEventType(str, Enum):
     ROOM_BRIDGED = "room.bridged"
     ROOM_BRIDGE_UPDATED = "room.bridge_updated"
     ROOM_UNBRIDGED = "room.unbridged"
+    ROOM_ROUTING_CHANGED = "room.routing_changed"
+    LEG_ROLE_CHANGED = "leg.role_changed"
     STT_TEXT = "stt.text"
     AGENT_CONNECTED = "agent.connected"
     AGENT_DISCONNECTED = "agent.disconnected"
@@ -117,6 +119,8 @@ class Leg(BaseModel):
     accept_dtmf: bool
     # Whether the call is on hold (SIP legs only)
     held: bool
+    # Routing role used by the room's audio routing matrix (e.g. "customer", "agent", "supervisor"). Empty string means unroled (full mesh).
+    role: str | None = None
     # Application identifier for event stream filtering.
     app_id: str | None = None
     # Deprecated: X-* headers from the inbound INVITE. Only present on sip_inbound legs. Use `headers` for new code; it carries the same map plus surfaces handshake headers for websocket legs.

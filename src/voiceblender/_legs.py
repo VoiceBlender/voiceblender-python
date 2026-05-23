@@ -6,7 +6,7 @@ DO NOT EDIT — run ``make generate`` to regenerate.
 from __future__ import annotations
 
 from voiceblender._client import Client
-from voiceblender._models import Leg, Room
+from voiceblender._models import Leg, Room, SetLegRoleRequest
 from voiceblender._playback import PlaybackRequest
 from voiceblender._requests import (
     AgentMessageRequest,
@@ -522,5 +522,22 @@ async def _leg_start_amd(self: Leg, req: AMDParams) -> StatusResponse:
 
 
 Leg.start_amd = _leg_start_amd  # type: ignore[method-assign]
+
+
+async def _leg_set_leg_role(self: Leg, req: SetLegRoleRequest) -> Leg:
+    """Change a leg's routing role
+
+    Updates the leg's routing role and, if the leg is currently in a room, recomputes the room's matrix-derived allow-sets atomically (single mixer-mutex acquisition). The next mix tick (≤ 20 ms) reflects the change.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("PATCH", f"/legs/{self.id}/role", body=req, out_model=Leg)
+    if out is not None:
+        out._client = self._client
+    assert out is not None, "setLegRole" + ": empty response"
+    return out
+
+
+Leg.set_leg_role = _leg_set_leg_role  # type: ignore[method-assign]
 
 _unused: tuple = (Leg, Room)

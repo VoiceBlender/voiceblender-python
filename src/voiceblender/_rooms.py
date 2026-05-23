@@ -6,7 +6,13 @@ DO NOT EDIT — run ``make generate`` to regenerate.
 from __future__ import annotations
 
 from voiceblender._client import Client
-from voiceblender._models import Leg, Room
+from voiceblender._models import (
+    Leg,
+    Room,
+    RoomRoutingRequest,
+    RoomRoutingUpdateRequest,
+    RoomRoutingView,
+)
 from voiceblender._playback import PlaybackRequest
 from voiceblender._requests import (
     AddLegRequest,
@@ -105,6 +111,55 @@ async def _room_remove_leg(self: Room, leg_id: str) -> StatusResponse:
 
 
 Room.remove_leg = _room_remove_leg  # type: ignore[method-assign]
+
+
+async def _room_get_room_routing(self: Room) -> RoomRoutingView:
+    """Get the room's audio routing matrix
+
+    Returns the per-listener-role source whitelist used by the room's audio mixer. A listener role absent from the matrix defaults to full mesh (hears every other leg). A role with an empty `[]` list is an isolated listener that hears nothing.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("GET", f"/rooms/{self.id}/routing", out_model=RoomRoutingView)
+    assert out is not None, "getRoomRouting" + ": empty response"
+    return out
+
+
+Room.get_room_routing = _room_get_room_routing  # type: ignore[method-assign]
+
+
+async def _room_set_room_routing(self: Room, req: RoomRoutingRequest) -> RoomRoutingView:
+    """Replace the room's audio routing matrix
+
+    Atomically replaces the room's audio routing matrix and recomputes every leg's per-listener source whitelist in one mixer-mutex acquisition. The next mix tick (≤ 20 ms) reflects the new routing. Roles are operator-supplied strings (e.g. "customer", "agent", "supervisor"). A leg with no role defaults to full mesh.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "PUT", f"/rooms/{self.id}/routing", body=req, out_model=RoomRoutingView
+    )
+    assert out is not None, "setRoomRouting" + ": empty response"
+    return out
+
+
+Room.set_room_routing = _room_set_room_routing  # type: ignore[method-assign]
+
+
+async def _room_update_room_routing(self: Room, req: RoomRoutingUpdateRequest) -> RoomRoutingView:
+    """Replace selected rows of the room's audio routing matrix
+
+    Replaces the listed listener-role rows. Pass `"sources": null` on an update to clear that row back to full mesh.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "PATCH", f"/rooms/{self.id}/routing", body=req, out_model=RoomRoutingView
+    )
+    assert out is not None, "updateRoomRouting" + ": empty response"
+    return out
+
+
+Room.update_room_routing = _room_update_room_routing  # type: ignore[method-assign]
 
 
 async def _room_play(self: Room, req: PlaybackRequest) -> PlaybackResponse:

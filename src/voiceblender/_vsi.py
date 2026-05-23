@@ -30,6 +30,7 @@ class AddLegPayload(BaseModel):
     mute: bool | None = None
     deaf: bool | None = None
     accept_dtmf: bool | None = None
+    role: str | None = None
 
 
 class AddLegToRoomResult(BaseModel):
@@ -369,6 +370,41 @@ class RoomLegPayload(BaseModel):
     leg_id: str
 
 
+class RoomRoutingSetPayload(BaseModel):
+    """RoomRoutingSetPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    room_id: str
+    matrix: dict[str, list[str]]
+
+
+class RoomRoutingUpdatePayload(BaseModel):
+    """RoomRoutingUpdatePayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    room_id: str
+    updates: list[RoutingRowUpdate]
+
+
+class RoomRoutingView(BaseModel):
+    """RoomRoutingView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    matrix: dict[str, list[str]]
+
+
+class RoutingRowUpdate(BaseModel):
+    """RoutingRowUpdate."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    listener_role: str
+    sources: list[str]
+
+
 class STTStartLegResult(BaseModel):
     """STTStartLegResult."""
 
@@ -406,6 +442,15 @@ class STTStopResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     status: str | None = None
+
+
+class SetLegRolePayload(BaseModel):
+    """SetLegRolePayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str
+    role: str
 
 
 class TTSStartPayload(BaseModel):
@@ -765,6 +810,45 @@ async def _vsi_bridge_delete(self: EventStream, payload: BridgeRefPayload) -> VS
 
 
 EventStream.bridge_delete = _vsi_bridge_delete  # type: ignore[method-assign]
+
+
+async def _vsi_room_routing_get(self: EventStream, payload: IDPayload) -> RoomRoutingView:
+    """Get a room's audio routing matrix"""
+    out = await self._call("room_routing_get", payload, result_model=RoomRoutingView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.room_routing_get = _vsi_room_routing_get  # type: ignore[method-assign]
+
+
+async def _vsi_room_routing_set(
+    self: EventStream, payload: RoomRoutingSetPayload
+) -> RoomRoutingView:
+    """Replace a room's audio routing matrix"""
+    out = await self._call("room_routing_set", payload, result_model=RoomRoutingView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.room_routing_set = _vsi_room_routing_set  # type: ignore[method-assign]
+
+
+async def _vsi_room_routing_update(
+    self: EventStream, payload: RoomRoutingUpdatePayload
+) -> RoomRoutingView:
+    """Update selected rows of a room's audio routing matrix"""
+    out = await self._call("room_routing_update", payload, result_model=RoomRoutingView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.room_routing_update = _vsi_room_routing_update  # type: ignore[method-assign]
+
+
+async def _vsi_set_leg_role(self: EventStream, payload: SetLegRolePayload) -> JsonValue:
+    """Change a leg's routing role (recomputes the room matrix if the leg is in a room)"""
+    return await self._call("set_leg_role", payload)  # type: ignore[no-any-return]
+
+
+EventStream.set_leg_role = _vsi_set_leg_role  # type: ignore[method-assign]
 
 
 async def _vsi_leg_ring(self: EventStream, payload: IDPayload) -> VSIStatusResponse:

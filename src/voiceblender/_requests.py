@@ -319,6 +319,8 @@ class AddLegRequest(BaseModel):
     deaf: bool | None = None
     # If set, control whether this leg receives DTMF digits broadcast from other legs in the same room. Omit to leave current state untouched (default for new legs is true).
     accept_dtmf: bool | None = None
+    # If set, apply this routing role to the leg atomically before it joins the mixer. The room's routing matrix (see PUT /v1/rooms/{id}/routing) decides which other legs this leg hears and is heard by based on roles. Pass "" to clear the role (full mesh). Omit to leave the current role untouched.
+    role: str | None = None
 
 
 class ICECandidateInit(BaseModel):

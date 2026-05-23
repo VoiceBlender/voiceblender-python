@@ -550,6 +550,29 @@ class RoomUnbridgedEvent(Event):
     reason: str | None = None
 
 
+class RoomRoutingChangedEvent(Event):
+    """Fired when: the room's audio routing matrix changed"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    room_id: str | None = None
+    app_id: str | None = None
+    matrix: dict[str, list[str]] | None = None
+    reason: str | None = None
+
+
+class LegRoleChangedEvent(Event):
+    """Fired when: a leg's routing role changed"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    room_id: str | None = None
+    app_id: str | None = None
+    old_role: str | None = None
+    new_role: str | None = None
+
+
 class STTTextEvent(Event):
     """Fired when: speech-to-text transcript"""
 
@@ -688,6 +711,8 @@ _EVENT_TYPES: dict[str, type[Event]] = {
     "room.bridged": RoomBridgedEvent,
     "room.bridge_updated": RoomBridgeUpdatedEvent,
     "room.unbridged": RoomUnbridgedEvent,
+    "room.routing_changed": RoomRoutingChangedEvent,
+    "leg.role_changed": LegRoleChangedEvent,
     "stt.text": STTTextEvent,
     "agent.connected": AgentConnectedEvent,
     "agent.disconnected": AgentDisconnectedEvent,
