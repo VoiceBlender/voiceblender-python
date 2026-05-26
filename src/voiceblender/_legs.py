@@ -58,6 +58,20 @@ async def _client_create_leg(self: Client, req: CreateLegRequest) -> Leg:
 Client.create_leg = _client_create_leg  # type: ignore[method-assign]
 
 
+async def _client_moq_leg(self: Client) -> StatusResponse:
+    """Connect a MoQ (Media over QUIC) leg (WebTransport extended-CONNECT, experimental)
+
+    **Actual HTTP method: `CONNECT`** (HTTP/3 extended-CONNECT for WebTransport). OpenAPI 3.1 does not define `connect` as a path-item method, so this operation is documented under `post` with an `x-actual-method: CONNECT` extension. Standard HTTP clients (e.g. `curl -X POST`) will receive `405 Method Not Allowed` — use a WebTransport-capable HTTP/3 client.
+
+    **Experimental / PoC.** Upgrades an HTTP/3 extended-CONNECT request to a WebTransport session and creates an inbound MoQ leg. Reachable only over HTTP/3 on the MoQ listener (not on the regular HTTP/1.1 chi listener). Requires `MOQ_ENABLED=true` plus `MOQ_TLS_CERT_FILE` and `MOQ_TLS_KEY_FILE`. Speaks IETF draft-11 of moq-transport (via `mengelbart/moqtransport`); browser interop with draft-16 clients (moqtail, moq.dev) is not expected to work. Audio is Opus framed one frame per MoQ Object (LOC-style), single MoQ session per leg. Query parameters: `sample_rate` (8000/16000/24000/48000; default 48000); `room_id` to auto-add the leg to a room; `app_id` for event filtering; `webhook_url`/`webhook_secret` for per-leg event routing. X-* and P-* request headers (plus Authorization) are captured into the leg's `headers` map and surfaced on `LegView`. The leg goes straight to `connected` (no ringing/answer flow); no DTMF, no RTT, and event parity is limited to `leg.connected` / `leg.disconnected`.
+    """
+    out = await self._do("POST", "/legs/moq", out_model=StatusResponse)
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Client.moq_leg = _client_moq_leg  # type: ignore[method-assign]
+
+
 async def _client_get_leg(self: Client, id: str) -> Leg:
     """Get a single leg"""
     out = await self._do("GET", f"/legs/{id}", out_model=Leg)
