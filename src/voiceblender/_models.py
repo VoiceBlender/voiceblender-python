@@ -24,6 +24,9 @@ class LegType(str, Enum):
     WHATSAPP_OUT = "whatsapp_out"
     WEBSOCKET_IN = "websocket_in"
     WEBSOCKET_OUT = "websocket_out"
+    MOQ_IN = "moq_in"
+    LIVEKIT_PUBLISH = "livekit_publish"
+    LIVEKIT_PARTICIPANT = "livekit_participant"
 
 
 class LegState(str, Enum):
@@ -86,6 +89,8 @@ class WebhookEventType(str, Enum):
     AGENT_AGENT_RESPONSE = "agent.agent_response"
     AMD_RESULT = "amd.result"
     AMD_BEEP = "amd.beep"
+    SIP_REGISTRATION_ACTIVE = "sip.registration_active"
+    SIP_REGISTRATION_EXPIRED = "sip.registration_expired"
 
 
 # ChannelInfo is referenced in the spec but not fully defined; use JsonValue.

@@ -361,6 +361,32 @@ class RecordingStopRoomResult(BaseModel):
     channels: dict[str, ChannelInfo] | None = None
 
 
+class RegistrationView(BaseModel):
+    """RegistrationView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    aor: str
+    contact: str
+    socket: str
+    transport: str
+    user_agent: str | None = None
+    call_id: str | None = None
+    app_id: str | None = None
+    created_at: str
+    last_refresh: str
+    expires_at: str
+    granted_expires_seconds: int
+
+
+class RegistrationsResponse(BaseModel):
+    """RegistrationsResponse."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    bindings: list[RegistrationView] | None = None
+
+
 class RoomLegPayload(BaseModel):
     """RoomLegPayload."""
 
@@ -1215,3 +1241,12 @@ async def _vsi_room_agent_message(
 
 
 EventStream.room_agent_message = _vsi_room_agent_message  # type: ignore[method-assign]
+
+
+async def _vsi_list_sip_registrations(self: EventStream) -> RegistrationsResponse:
+    """List active SIP AOR registrations"""
+    out = await self._call("list_sip_registrations", None, result_model=RegistrationsResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.list_sip_registrations = _vsi_list_sip_registrations  # type: ignore[method-assign]

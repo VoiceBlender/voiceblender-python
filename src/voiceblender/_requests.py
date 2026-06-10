@@ -5,6 +5,8 @@ DO NOT EDIT — run ``make generate`` to regenerate.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
@@ -66,6 +68,8 @@ class CreateLegRequest(BaseModel):
     wire_format: str | None = None
     # On-the-wire PCM sample encoding for websocket legs. v1 only supports `s16le`.
     sample_format: str | None = None
+    # LiveKit room join parameters (only used when type=livekit_room).
+    livekit: Any = None
 
 
 class AnswerLegRequest(BaseModel):
