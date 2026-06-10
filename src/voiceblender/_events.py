@@ -673,6 +673,46 @@ class AMDBeepEvent(Event):
     beep_ms: int | None = None
 
 
+class SIPRegistrationActiveEvent(Event):
+    """Fired when: sIP AOR registration created or refreshed (one event per Contact)"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    app_id: str | None = None
+    # Canonical Address of Record (e.g. sip:alice@vb.example)
+    aor: str | None = None
+    # Contact URI registered by the UA
+    contact: str | None = None
+    # Transport-layer socket (ip:port) the REGISTER arrived on
+    socket: str | None = None
+    # Transport: udp | tcp | tls
+    transport: str | None = None
+    # User-Agent header from the REGISTER, if present
+    user_agent: str | None = None
+    # Call-ID of the most recent REGISTER
+    call_id: str | None = None
+    # Expiry granted to the binding (clamped to SIP_REGISTRATION_MAX_EXPIRES_SECONDS)
+    granted_expires_seconds: int | None = None
+    # Absolute expiry time (RFC 3339)
+    expires_at: str | None = None
+
+
+class SIPRegistrationExpiredEvent(Event):
+    """Fired when: sIP AOR registration removed (TTL, explicit unregister, force-delete, or single-binding replacement)"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    app_id: str | None = None
+    # Canonical Address of Record
+    aor: str | None = None
+    # Contact URI that was unbound
+    contact: str | None = None
+    # Transport-layer socket that held the binding
+    socket: str | None = None
+    # Why the binding was removed: ttl, unregistered, forced, or replaced
+    reason: str | None = None
+
+
 _EVENT_TYPES: dict[str, type[Event]] = {
     "leg.ringing": LegRingingEvent,
     "leg.early_media": LegEarlyMediaEvent,
@@ -720,6 +760,8 @@ _EVENT_TYPES: dict[str, type[Event]] = {
     "agent.agent_response": AgentAgentResponseEvent,
     "amd.result": AMDResultEvent,
     "amd.beep": AMDBeepEvent,
+    "sip.registration_active": SIPRegistrationActiveEvent,
+    "sip.registration_expired": SIPRegistrationExpiredEvent,
 }
 
 
