@@ -6,12 +6,13 @@ DO NOT EDIT — run ``make generate`` to regenerate.
 from __future__ import annotations
 
 from voiceblender._client import Client
-from voiceblender._models import Leg, Room, SetLegRoleRequest
+from voiceblender._models import Leg, Room
 from voiceblender._playback import PlaybackRequest
 from voiceblender._requests import (
     AgentMessageRequest,
     AMDParams,
     AnswerLegRequest,
+    ChallengeRequest,
     CreateLegRequest,
     DeepgramAgentRequest,
     DeleteLegRequest,
@@ -21,7 +22,11 @@ from voiceblender._requests import (
     PipecatAgentRequest,
     RecordingRequest,
     RTTRequest,
+    SetLegRoleRequest,
     STTRequest,
+    TransferCompleteRequest,
+    TransferDeclineRequest,
+    TransferProgressRequest,
     TransferRequest,
     TTSRequest,
     VAPIAgentRequest,
@@ -134,6 +139,22 @@ async def _leg_ring(self: Leg) -> StatusResponse:
 Leg.ring = _leg_ring  # type: ignore[method-assign]
 
 
+async def _leg_challenge_leg(self: Leg, req: ChallengeRequest) -> StatusResponse:
+    """Challenge a ringing inbound SIP leg with a 401 digest auth request
+
+    Sends a SIP 401 Unauthorized carrying a `WWW-Authenticate` digest challenge on an unanswered inbound INVITE. The current leg is torn down (a `leg.disconnected` with `reason="challenged"` is published); the UAC's credentialed re-INVITE arrives as a new inbound call surfaced via `leg.ringing` with `authenticated=true` once VoiceBlender verifies the response against the supplied credential. Provide either `password` or `ha1`. An invalid retry is answered with 403 Forbidden and never surfaced.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/challenge", body=req, out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.challenge_leg = _leg_challenge_leg  # type: ignore[method-assign]
+
+
 async def _leg_early_media(self: Leg, req: EarlyMediaLegRequest) -> StatusResponse:
     """Enable early media on a ringing inbound SIP leg (asynchronous)
 
@@ -217,6 +238,70 @@ async def _leg_transfer(self: Leg, req: TransferRequest) -> StatusResponse:
 
 
 Leg.transfer = _leg_transfer  # type: ignore[method-assign]
+
+
+async def _leg_accept_transfer(self: Leg) -> StatusResponse:
+    """Accept a parked inbound REFER
+
+    Accepts an inbound transfer surfaced via `leg.transfer_requested` (default app-driven model, `SIP_REFER_AUTO_DIAL=false`). Sends `202 Accepted` to the referrer and a `NOTIFY` sipfrag `100 Trying`, keeping the refer subscription open. `{id}` is the referrer leg (the leg that received the REFER). After accepting, re-bridge as needed and report progress via `.../transfer/progress` and the outcome via `.../transfer/complete`.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/transfer/accept", out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.accept_transfer = _leg_accept_transfer  # type: ignore[method-assign]
+
+
+async def _leg_transfer_progress(self: Leg, req: TransferProgressRequest) -> StatusResponse:
+    """Report interim transfer progress
+
+    Sends an interim sipfrag `NOTIFY` (e.g. `180 Ringing`) on an accepted inbound transfer so the referrer's UA reflects real progress. The subscription stays active.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/transfer/progress", body=req, out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.transfer_progress = _leg_transfer_progress  # type: ignore[method-assign]
+
+
+async def _leg_complete_transfer(self: Leg, req: TransferCompleteRequest) -> StatusResponse:
+    """Complete an accepted inbound transfer
+
+    Terminates an accepted inbound transfer with a final sipfrag `NOTIFY` and emits `leg.transfer_completed` (on success) or `leg.transfer_failed`. `success:true` sends `200 OK`; otherwise `status_code`/`reason` (default 500) carry the failure. The referrer leg is left for the app to hang up.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/transfer/complete", body=req, out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.complete_transfer = _leg_complete_transfer  # type: ignore[method-assign]
+
+
+async def _leg_decline_transfer(self: Leg, req: TransferDeclineRequest) -> StatusResponse:
+    """Decline a parked inbound REFER
+
+    Rejects a parked (not-yet-accepted) inbound transfer, replying to the referrer with a non-2xx (`603 Decline` by default; override via `code`/`reason`) and emitting `leg.transfer_failed`.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/transfer/decline", body=req, out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.decline_transfer = _leg_decline_transfer  # type: ignore[method-assign]
 
 
 async def _leg_send_dtmf(self: Leg, req: DTMFRequest) -> StatusResponse:
@@ -538,7 +623,7 @@ async def _leg_start_amd(self: Leg, req: AMDParams) -> StatusResponse:
 Leg.start_amd = _leg_start_amd  # type: ignore[method-assign]
 
 
-async def _leg_set_leg_role(self: Leg, req: SetLegRoleRequest) -> Leg:
+async def _leg_set_role(self: Leg, req: SetLegRoleRequest) -> Leg:
     """Change a leg's routing role
 
     Updates the leg's routing role and, if the leg is currently in a room, recomputes the room's matrix-derived allow-sets atomically (single mixer-mutex acquisition). The next mix tick (≤ 20 ms) reflects the change.
@@ -552,6 +637,6 @@ async def _leg_set_leg_role(self: Leg, req: SetLegRoleRequest) -> Leg:
     return out
 
 
-Leg.set_leg_role = _leg_set_leg_role  # type: ignore[method-assign]
+Leg.set_role = _leg_set_role  # type: ignore[method-assign]
 
 _unused: tuple = (Leg, Room)

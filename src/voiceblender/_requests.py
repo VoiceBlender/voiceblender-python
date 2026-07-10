@@ -92,6 +92,20 @@ class EarlyMediaLegRequest(BaseModel):
     codec: str | None = None
 
 
+class ChallengeRequest(BaseModel):
+    """ChallengeRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    realm: str
+    username: str | None = None
+    password: str | None = None
+    ha_1: str | None = Field(default=None, alias="ha1")
+    algorithm: str | None = None
+    qop: list[str] | None = None
+    max_expires: int | None = None
+
+
 class DeleteLegRequest(BaseModel):
     """DeleteLegRequest."""
 
@@ -110,6 +124,34 @@ class TransferRequest(BaseModel):
     target: str
     # ID of an existing connected SIP leg whose dialog should be replaced (attended transfer). Omit for blind transfer.
     replaces_leg_id: str | None = None
+
+
+class TransferProgressRequest(BaseModel):
+    """TransferProgressRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    status_code: int
+    reason: str | None = None
+
+
+class TransferCompleteRequest(BaseModel):
+    """TransferCompleteRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    success: bool
+    status_code: int | None = None
+    reason: str | None = None
+
+
+class TransferDeclineRequest(BaseModel):
+    """TransferDeclineRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    code: int | None = None
+    reason: str | None = None
 
 
 class DTMFRequest(BaseModel):
@@ -325,6 +367,44 @@ class AddLegRequest(BaseModel):
     accept_dtmf: bool | None = None
     # If set, apply this routing role to the leg atomically before it joins the mixer. The room's routing matrix (see PUT /v1/rooms/{id}/routing) decides which other legs this leg hears and is heard by based on roles. Pass "" to clear the role (full mesh). Omit to leave the current role untouched.
     role: str | None = None
+
+
+class SetLegRoleRequest(BaseModel):
+    """SetLegRoleRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # New routing role for the leg. The room's routing matrix decides which other legs this leg hears and is heard by based on roles. Pass an empty string to clear the role (full mesh).
+    role: str
+
+
+class RoomRoutingRequest(BaseModel):
+    """RoomRoutingRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Listener-role → list of allowed source roles. Omitted listener roles default to full mesh. Empty list = hears nothing.
+    matrix: dict[str, list[str]]
+
+
+class RoutingRowUpdate(BaseModel):
+    """RoutingRowUpdate."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # The role whose row is being replaced.
+    listener_role: str
+    # New list of allowed source roles for this listener role. Pass null to clear the row (full mesh).
+    sources: list[str]
+
+
+class RoomRoutingUpdateRequest(BaseModel):
+    """RoomRoutingUpdateRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Per-listener-role row replacements applied as a single atomic update.
+    updates: list[RoutingRowUpdate]
 
 
 class ICECandidateInit(BaseModel):

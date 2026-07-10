@@ -89,8 +89,12 @@ class WebhookEventType(str, Enum):
     AGENT_AGENT_RESPONSE = "agent.agent_response"
     AMD_RESULT = "amd.result"
     AMD_BEEP = "amd.beep"
+    SIP_REGISTRATION_ATTEMPT = "sip.registration_attempt"
     SIP_REGISTRATION_ACTIVE = "sip.registration_active"
     SIP_REGISTRATION_EXPIRED = "sip.registration_expired"
+    SIP_OUTBOUND_REGISTRATION_ACTIVE = "sip.outbound_registration_active"
+    SIP_OUTBOUND_REGISTRATION_FAILED = "sip.outbound_registration_failed"
+    SIP_OUTBOUND_REGISTRATION_EXPIRED = "sip.outbound_registration_expired"
 
 
 # ChannelInfo is referenced in the spec but not fully defined; use JsonValue.

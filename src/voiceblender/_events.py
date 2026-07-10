@@ -43,6 +43,10 @@ class LegRingingEvent(Event):
     # X-* custom SIP headers, if present
     sip_headers: dict[str, str] | None = None
     offered_codecs: list[OfferedCodec] | None = None
+    trunk_id: str | None = None
+    source_address: str | None = None
+    authenticated: bool | None = None
+    auth_username: str | None = None
 
 
 class LegEarlyMediaEvent(Event):
@@ -421,7 +425,7 @@ class LegTransferInitiatedEvent(Event):
 
 
 class LegTransferRequestedEvent(Event):
-    """Fired when: we received a SIP REFER from the peer"""
+    """Fired when: we received a SIP REFER from the peer; decide via accept_transfer/decline_transfer (unless SIP_REFER_AUTO_DIAL=true)"""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -434,7 +438,7 @@ class LegTransferRequestedEvent(Event):
     target: str | None = None
     # Call-ID present in the Refer-To Replaces parameter (attended only)
     replaces_call_id: str | None = None
-    # True when the REFER was declined (e.g. SIP_REFER_AUTO_DIAL=false)
+    # Vestigial (always false); retained for wire compatibility. The outcome now flows via leg.transfer_completed / leg.transfer_failed after the app decides
     declined: bool | None = None
 
 
@@ -673,6 +677,22 @@ class AMDBeepEvent(Event):
     beep_ms: int | None = None
 
 
+class SIPRegistrationAttemptEvent(Event):
+    """Fired when: inbound REGISTER surfaced for a challenge/accept/reject decision (auto-accepts on consult timeout)"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    app_id: str | None = None
+    attempt_id: str | None = None
+    aor: str | None = None
+    contact: str | None = None
+    source_address: str | None = None
+    transport: str | None = None
+    user_agent: str | None = None
+    call_id: str | None = None
+    has_authorization: bool | None = None
+
+
 class SIPRegistrationActiveEvent(Event):
     """Fired when: sIP AOR registration created or refreshed (one event per Contact)"""
 
@@ -710,6 +730,48 @@ class SIPRegistrationExpiredEvent(Event):
     # Transport-layer socket that held the binding
     socket: str | None = None
     # Why the binding was removed: ttl, unregistered, forced, or replaced
+    reason: str | None = None
+
+
+class SIPOutboundRegistrationActiveEvent(Event):
+    """Fired when: outbound SIP trunk REGISTER accepted (initial or refresh)"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    app_id: str | None = None
+    trunk_id: str | None = None
+    aor: str | None = None
+    registrar: str | None = None
+    contact: str | None = None
+    granted_expires_seconds: int | None = None
+    expires_at: str | None = None
+    call_id: str | None = None
+    source_address: str | None = None
+
+
+class SIPOutboundRegistrationFailedEvent(Event):
+    """Fired when: outbound SIP trunk REGISTER failed (transport error, non-2xx response, or digest auth rejected)"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    app_id: str | None = None
+    trunk_id: str | None = None
+    aor: str | None = None
+    registrar: str | None = None
+    status_code: int | None = None
+    reason: str | None = None
+    error: str | None = None
+
+
+class SIPOutboundRegistrationExpiredEvent(Event):
+    """Fired when: outbound SIP trunk removed (DELETE, shutdown, or refresh failed past granted lifetime)"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    app_id: str | None = None
+    trunk_id: str | None = None
+    aor: str | None = None
+    registrar: str | None = None
     reason: str | None = None
 
 
@@ -760,8 +822,12 @@ _EVENT_TYPES: dict[str, type[Event]] = {
     "agent.agent_response": AgentAgentResponseEvent,
     "amd.result": AMDResultEvent,
     "amd.beep": AMDBeepEvent,
+    "sip.registration_attempt": SIPRegistrationAttemptEvent,
     "sip.registration_active": SIPRegistrationActiveEvent,
     "sip.registration_expired": SIPRegistrationExpiredEvent,
+    "sip.outbound_registration_active": SIPOutboundRegistrationActiveEvent,
+    "sip.outbound_registration_failed": SIPOutboundRegistrationFailedEvent,
+    "sip.outbound_registration_expired": SIPOutboundRegistrationExpiredEvent,
 }
 
 
