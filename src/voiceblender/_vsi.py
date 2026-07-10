@@ -13,11 +13,29 @@ from voiceblender._requests import (
     CreateLegRequest,
     CreateRoomRequest,
     ICECandidateInit,
+    RoutingRowUpdate,
     WebRTCOfferRequest,
 )
 from voiceblender._stream import EventStream
 
 # ── VSI payload / result schemas ──────────────────────────────────────
+
+
+class AcceptRegistrationPayload(BaseModel):
+    """AcceptRegistrationPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    max_expires: int | None = None
+
+
+class AcceptTransferPayload(BaseModel):
+    """AcceptTransferPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
 
 
 class AddLegPayload(BaseModel):
@@ -191,6 +209,36 @@ class BridgeView(BaseModel):
     sample_rate: int
 
 
+class ChallengeLegPayload(BaseModel):
+    """ChallengeLegPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    realm: str
+    username: str | None = None
+    password: str | None = None
+    ha_1: str | None = Field(default=None, alias="ha1")
+    algorithm: str | None = None
+    qop: list[str] | None = None
+    max_expires: int | None = None
+
+
+class ChallengeRegistrationPayload(BaseModel):
+    """ChallengeRegistrationPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    realm: str
+    username: str | None = None
+    password: str | None = None
+    ha_1: str | None = Field(default=None, alias="ha1")
+    algorithm: str | None = None
+    qop: list[str] | None = None
+    max_expires: int | None = None
+
+
 class ChannelInfo(BaseModel):
     """ChannelInfo."""
 
@@ -199,6 +247,38 @@ class ChannelInfo(BaseModel):
     channel: int
     start_ms: int
     end_ms: int
+
+
+class CompleteTransferPayload(BaseModel):
+    """CompleteTransferPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    success: bool
+    status_code: int | None = None
+    reason: str | None = None
+
+
+class CreateTrunkRequest(BaseModel):
+    """CreateTrunkRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    type: str
+    app_id: str | None = None
+    sip_register: SIPRegisterTrunkSpec | None = None
+    ip_ip: IPIPTrunkSpec | None = None
+
+
+class CreateTrunkResponse(BaseModel):
+    """CreateTrunkResponse."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str | None = None
+    type: str | None = None
+    status: str | None = None
 
 
 class DTMFPayload(BaseModel):
@@ -210,6 +290,16 @@ class DTMFPayload(BaseModel):
     digits: str
 
 
+class DeclineTransferPayload(BaseModel):
+    """DeclineTransferPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    code: int | None = None
+    reason: str | None = None
+
+
 class DeleteLegPayload(BaseModel):
     """DeleteLegPayload."""
 
@@ -217,6 +307,15 @@ class DeleteLegPayload(BaseModel):
 
     id: str
     reason: str | None = None
+
+
+class DeleteRegistrationPayload(BaseModel):
+    """DeleteRegistrationPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    aor: str
+    contact: str | None = None
 
 
 class EarlyMediaPayload(BaseModel):
@@ -234,6 +333,22 @@ class IDPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     id: str
+
+
+class IPIPTrunkSpec(BaseModel):
+    """IPIPTrunkSpec."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    peer_uri: str | None = None
+
+
+class IPIPTrunkView(BaseModel):
+    """IPIPTrunkView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    peer_uri: str | None = None
 
 
 class LegAMDStartPayload(BaseModel):
@@ -297,6 +412,16 @@ class PlaybackVolumePayload(BaseModel):
     id: str
     playback_id: str
     volume: int
+
+
+class ProgressTransferPayload(BaseModel):
+    """ProgressTransferPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    status_code: int
+    reason: str | None = None
 
 
 class RTTPayload(BaseModel):
@@ -387,6 +512,16 @@ class RegistrationsResponse(BaseModel):
     bindings: list[RegistrationView] | None = None
 
 
+class RejectRegistrationPayload(BaseModel):
+    """RejectRegistrationPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    code: int | None = None
+    reason: str | None = None
+
+
 class RoomLegPayload(BaseModel):
     """RoomLegPayload."""
 
@@ -422,13 +557,35 @@ class RoomRoutingView(BaseModel):
     matrix: dict[str, list[str]]
 
 
-class RoutingRowUpdate(BaseModel):
-    """RoutingRowUpdate."""
+class SIPRegisterTrunkSpec(BaseModel):
+    """SIPRegisterTrunkSpec."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    listener_role: str
-    sources: list[str]
+    registrar_uri: str
+    aor: str
+    username: str | None = None
+    password: str
+    contact_user: str | None = None
+    expires_seconds: int | None = None
+
+
+class SIPRegisterTrunkView(BaseModel):
+    """SIPRegisterTrunkView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    registrar_uri: str
+    aor: str
+    username: str | None = None
+    contact_uri: str | None = None
+    requested_expires_seconds: int
+    granted_expires_seconds: int | None = None
+    last_registered_at: str | None = None
+    next_refresh_at: str | None = None
+    call_id: str | None = None
+    cseq: int | None = None
+    source_address: str | None = None
 
 
 class STTStartLegResult(BaseModel):
@@ -520,6 +677,29 @@ class TransferLegResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     status: str | None = None
+
+
+class TrunkView(BaseModel):
+    """TrunkView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    type: str
+    app_id: str | None = None
+    status: str
+    last_error: str | None = None
+    created_at: str
+    sip_register: SIPRegisterTrunkView | None = None
+    ip_ip: IPIPTrunkView | None = None
+
+
+class TrunksListResponse(BaseModel):
+    """TrunksListResponse."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    trunks: list[TrunkView] | None = None
 
 
 class VSIStatusResponse(BaseModel):
@@ -1117,6 +1297,50 @@ async def _vsi_leg_transfer(self: EventStream, payload: TransferLegPayload) -> T
 EventStream.leg_transfer = _vsi_leg_transfer  # type: ignore[method-assign]
 
 
+async def _vsi_accept_transfer(
+    self: EventStream, payload: AcceptTransferPayload
+) -> VSIStatusResponse:
+    """Accept a parked inbound REFER (send 202 + NOTIFY 100 Trying)"""
+    out = await self._call("accept_transfer", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.accept_transfer = _vsi_accept_transfer  # type: ignore[method-assign]
+
+
+async def _vsi_progress_transfer(
+    self: EventStream, payload: ProgressTransferPayload
+) -> VSIStatusResponse:
+    """Send an interim sipfrag NOTIFY (e.g. 180 Ringing) on an accepted inbound transfer"""
+    out = await self._call("progress_transfer", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.progress_transfer = _vsi_progress_transfer  # type: ignore[method-assign]
+
+
+async def _vsi_complete_transfer(
+    self: EventStream, payload: CompleteTransferPayload
+) -> VSIStatusResponse:
+    """Terminate an accepted inbound transfer with a final sipfrag NOTIFY (200 OK or failure)"""
+    out = await self._call("complete_transfer", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.complete_transfer = _vsi_complete_transfer  # type: ignore[method-assign]
+
+
+async def _vsi_decline_transfer(
+    self: EventStream, payload: DeclineTransferPayload
+) -> VSIStatusResponse:
+    """Reject a parked (not-yet-accepted) inbound REFER (603 by default)"""
+    out = await self._call("decline_transfer", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.decline_transfer = _vsi_decline_transfer  # type: ignore[method-assign]
+
+
 async def _vsi_leg_agent_elevenlabs(
     self: EventStream, payload: AgentElevenLabsPayload
 ) -> AgentStartLegResult:
@@ -1250,3 +1474,94 @@ async def _vsi_list_sip_registrations(self: EventStream) -> RegistrationsRespons
 
 
 EventStream.list_sip_registrations = _vsi_list_sip_registrations  # type: ignore[method-assign]
+
+
+async def _vsi_delete_sip_registration(
+    self: EventStream, payload: DeleteRegistrationPayload
+) -> VSIStatusResponse:
+    """Force-unbind an AOR (or a single contact under it)"""
+    out = await self._call("delete_sip_registration", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.delete_sip_registration = _vsi_delete_sip_registration  # type: ignore[method-assign]
+
+
+async def _vsi_challenge_leg(self: EventStream, payload: ChallengeLegPayload) -> VSIStatusResponse:
+    """Send a 401 digest challenge on a ringing inbound SIP leg (INVITE)"""
+    out = await self._call("challenge_leg", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.challenge_leg = _vsi_challenge_leg  # type: ignore[method-assign]
+
+
+async def _vsi_challenge_registration(
+    self: EventStream, payload: ChallengeRegistrationPayload
+) -> VSIStatusResponse:
+    """Send a 401 digest challenge for a parked inbound REGISTER attempt"""
+    out = await self._call("challenge_registration", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.challenge_registration = _vsi_challenge_registration  # type: ignore[method-assign]
+
+
+async def _vsi_accept_registration(
+    self: EventStream, payload: AcceptRegistrationPayload
+) -> VSIStatusResponse:
+    """Accept a parked inbound REGISTER attempt (bind and reply 200 OK)"""
+    out = await self._call("accept_registration", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.accept_registration = _vsi_accept_registration  # type: ignore[method-assign]
+
+
+async def _vsi_reject_registration(
+    self: EventStream, payload: RejectRegistrationPayload
+) -> VSIStatusResponse:
+    """Reject a parked inbound REGISTER attempt (reply 403 by default)"""
+    out = await self._call("reject_registration", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.reject_registration = _vsi_reject_registration  # type: ignore[method-assign]
+
+
+async def _vsi_create_sip_trunk(
+    self: EventStream, payload: CreateTrunkRequest
+) -> CreateTrunkResponse:
+    """Create an outbound SIP trunk (REGISTER or static peering)"""
+    out = await self._call("create_sip_trunk", payload, result_model=CreateTrunkResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.create_sip_trunk = _vsi_create_sip_trunk  # type: ignore[method-assign]
+
+
+async def _vsi_list_sip_trunks(self: EventStream) -> TrunksListResponse:
+    """List configured SIP trunks"""
+    out = await self._call("list_sip_trunks", None, result_model=TrunksListResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.list_sip_trunks = _vsi_list_sip_trunks  # type: ignore[method-assign]
+
+
+async def _vsi_get_sip_trunk(self: EventStream, payload: IDPayload) -> TrunkView:
+    """Get a single SIP trunk"""
+    out = await self._call("get_sip_trunk", payload, result_model=TrunkView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.get_sip_trunk = _vsi_get_sip_trunk  # type: ignore[method-assign]
+
+
+async def _vsi_delete_sip_trunk(self: EventStream, payload: IDPayload) -> VSIStatusResponse:
+    """Unregister and remove a SIP trunk"""
+    out = await self._call("delete_sip_trunk", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.delete_sip_trunk = _vsi_delete_sip_trunk  # type: ignore[method-assign]

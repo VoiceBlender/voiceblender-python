@@ -267,8 +267,12 @@ METHOD_NAME_OVERRIDES: dict[str, str] = {
     "agentLegPipecat": "pipecat_agent",
     "agentLegDeepgram": "deepgram_agent",
     "agentLegMessage": "agent_message",
+    "setLegRole": "set_role",
     # Room-scoped: drop "Room" suffix.
     "deleteRoom": "delete",
+    "getRoomRouting": "get_routing",
+    "setRoomRouting": "set_routing",
+    "updateRoomRouting": "update_routing",
     "addLegToRoom": "add_leg",
     "removeLegFromRoom": "remove_leg",
     "playRoom": "play",
@@ -339,7 +343,7 @@ TAG_FILE: dict[str, str] = {
 
 # AsyncAPI schemas to skip in ``_vsi.py`` because they're already emitted in
 # ``_requests.py`` (avoids a duplicate class definition).
-VSI_SKIP_SCHEMAS = {"ICECandidateInit", "WebRTCOfferRequest"}
+VSI_SKIP_SCHEMAS = {"ICECandidateInit", "WebRTCOfferRequest", "RoutingRowUpdate"}
 
 
 # ── Type name resolution ──────────────────────────────────────────────────────
@@ -716,12 +720,20 @@ def _zero_value_for(type_str: str) -> str:
 # ── Models / Requests / Responses generators ──────────────────────────────────
 
 
+# Request-body schemas emitted into _requests.py, in the same declaration order
+# as the Go generator's ``requestSchemas`` list (main.go:587-615) so the two
+# clients stay at parity. PlaybackRequest is excluded (hand-written in
+# _playback.py); ICECandidateInit is hardcoded below in gen_requests.
 REQUEST_SCHEMAS = [
     "CreateLegRequest",
     "AnswerLegRequest",
     "EarlyMediaLegRequest",
+    "ChallengeRequest",
     "DeleteLegRequest",
     "TransferRequest",
+    "TransferProgressRequest",
+    "TransferCompleteRequest",
+    "TransferDeclineRequest",
     "DTMFRequest",
     "RTTRequest",
     "VolumeRequest",
@@ -737,6 +749,14 @@ REQUEST_SCHEMAS = [
     "WebRTCOfferRequest",
     "RoomCreateRequest",
     "AddLegRequest",
+    "SetLegRoleRequest",
+    "RoomRoutingRequest",
+    # RoutingRowUpdate is referenced by both RoomRoutingUpdateRequest (below) and
+    # the VSI RoomRoutingUpdatePayload. Emit it here and skip it in _vsi.py (see
+    # VSI_SKIP_SCHEMAS) so _vsi imports it from _requests — the existing safe
+    # dependency direction (_vsi → _requests). Must precede its user below.
+    "RoutingRowUpdate",
+    "RoomRoutingUpdateRequest",
 ]
 
 
@@ -1267,6 +1287,13 @@ def _py_method_name(op_id: str) -> str:
     return snake(op_id)
 
 
+# Class names emitted into _vsi.py (the asyncapi payload/result schemas). Some
+# of these — e.g. RoomRoutingView — are also response types for HTTP operations
+# in _legs.py/_rooms.py, which must therefore import them from _vsi. Populated
+# in main() once the asyncapi spec is loaded; empty when generating without it.
+_VSI_CLASS_NAMES: set[str] = set()
+
+
 def _model_module(class_name_: str) -> str:
     """Return the import path for *class_name_*."""
     if class_name_ == "PlaybackRequest":
@@ -1282,6 +1309,12 @@ def _model_module(class_name_: str) -> str:
         return "voiceblender._models"
     if class_name_ == "StatusResponse":
         return "voiceblender._responses"
+    # Types emitted in _vsi.py but referenced by HTTP method files (e.g.
+    # RoomRoutingView, the getRoomRouting/setRoomRouting response). In Go these
+    # live in vsi.go too (single package, no import needed); Python needs the
+    # explicit cross-module import.
+    if class_name_ in _VSI_CLASS_NAMES:
+        return "voiceblender._vsi"
     # Default to _models for anything else (the placeholders ChannelInfo etc.).
     return "voiceblender._models"
 
@@ -1797,6 +1830,12 @@ def main() -> int:
     if args.asyncapi is not None:
         async_spec = load_yaml(args.asyncapi)
         async_defined = set((async_spec.get("components") or {}).get("schemas") or {})
+        # Record which class names _vsi.py will emit so _model_module can route
+        # HTTP method files' imports (e.g. RoomRoutingView) to _vsi. Mirrors the
+        # ``locally_emitted`` set computed in gen_vsi.
+        _VSI_CLASS_NAMES.update(
+            class_name(n) for n in async_defined if n not in VSI_SKIP_SCHEMAS
+        )
 
     models_src, placeholders = gen_models(schemas, async_defined)
     write(out / "_models.py", models_src)
