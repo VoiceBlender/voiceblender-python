@@ -68,6 +68,9 @@ ABBREVS = {
     "stt": "STT",
     "dtmf": "DTMF",
     "sip": "SIP",
+    # Longer runs must also be listed: snake() prefers the longest match, so
+    # "SIPREC" stays one token (start_leg_siprec, not start_leg_sip_rec).
+    "siprec": "SIPREC",
     "api": "API",
     "s3": "S3",
     "ice": "ICE",
@@ -181,6 +184,10 @@ def snake(name: str) -> str:
 
 TYPE_RENAMES: dict[str, str] = {
     "RoomCreateRequest": "CreateRoomRequest",
+    # The Error schema is the body of every 4xx/5xx response; the hand-written
+    # ``_errors.py`` already models it as APIError (same JSON fields, plus the
+    # status code), so refs resolve to that type.
+    "Error": "APIError",
 }
 
 # schema → property → final Python attribute name (overrides the snake_case
@@ -341,9 +348,8 @@ TAG_FILE: dict[str, str] = {
     "WebRTC": "_webrtc.py",
 }
 
-# AsyncAPI schemas to skip in ``_vsi.py`` because they're already emitted in
-# ``_requests.py`` (avoids a duplicate class definition).
-VSI_SKIP_SCHEMAS = {"ICECandidateInit", "WebRTCOfferRequest", "RoutingRowUpdate"}
+# AsyncAPI schemas are skipped in ``_vsi.py`` when the same class is already
+# declared from openapi.yaml or by hand — see ``_vsi_skip`` next to gen_vsi.
 
 
 # ── Type name resolution ──────────────────────────────────────────────────────
@@ -720,57 +726,103 @@ def _zero_value_for(type_str: str) -> str:
 # ── Models / Requests / Responses generators ──────────────────────────────────
 
 
-# Request-body schemas emitted into _requests.py, in the same declaration order
-# as the Go generator's ``requestSchemas`` list (main.go:587-615) so the two
-# clients stay at parity. PlaybackRequest is excluded (hand-written in
-# _playback.py); ICECandidateInit is hardcoded below in gen_requests.
-REQUEST_SCHEMAS = [
-    "CreateLegRequest",
-    "AnswerLegRequest",
-    "EarlyMediaLegRequest",
-    "ChallengeRequest",
-    "DeleteLegRequest",
-    "TransferRequest",
-    "TransferProgressRequest",
-    "TransferCompleteRequest",
-    "TransferDeclineRequest",
-    "DTMFRequest",
-    "RTTRequest",
-    "VolumeRequest",
-    "TTSRequest",
-    "STTRequest",
-    "DeepgramAgentRequest",
-    "ElevenLabsAgentRequest",
-    "PipecatAgentRequest",
-    "VAPIAgentRequest",
-    "AgentMessageRequest",
-    "AMDParams",
-    "RecordingRequest",
-    "WebRTCOfferRequest",
-    "RoomCreateRequest",
-    "AddLegRequest",
-    "SetLegRoleRequest",
-    "RoomRoutingRequest",
-    # RoutingRowUpdate is referenced by both RoomRoutingUpdateRequest (below) and
-    # the VSI RoomRoutingUpdatePayload. Emit it here and skip it in _vsi.py (see
-    # VSI_SKIP_SCHEMAS) so _vsi imports it from _requests — the existing safe
-    # dependency direction (_vsi → _requests). Must precede its user below.
-    "RoutingRowUpdate",
-    "RoomRoutingUpdateRequest",
-]
+# Component schemas that ``gen_requests`` must NOT emit because another pass —
+# or a hand-maintained module — already declares the class. Everything else in
+# ``components.schemas`` is emitted verbatim, in spec declaration order, so a
+# schema added to the spec needs no change here. Port of Go
+# ``schemasEmittedElsewhere`` (``main.go:474-483``).
+#
+# The policy is deliberately "emit everything, skip a known few": a whitelist
+# silently omits schemas added to the spec, leaving the generated client
+# referencing types that were never declared (which surfaces as ruff F821 at
+# best, and as a silently unbound method set at worst — see the ImportError
+# guards in ``__init__.py``).
+SCHEMAS_EMITTED_ELSEWHERE = {
+    "Leg": "_models.py, with the client back-reference",
+    "Room": "_models.py, with the client back-reference",
+    "WebhookEventType": "_models.py, as a str enum",
+    "WebhookEvent": "_events.py, as the Event base class",
+    "StatusResponse": "_responses.py",
+    "PlaybackRequest": "hand-written _playback.py (URL/tone exclusivity)",
+    "ICECandidateInit": "hardcoded in gen_requests to add usernameFragment",
+    "Error": "hand-written _errors.py declares APIError for the error body",
+}
+
+# Python classes declared in the hand-maintained modules. A spec ``$ref``
+# resolving to one of these is already satisfied, so no placeholder alias is
+# emitted for it and ``_vsi.py`` must not redeclare it. Port of Go
+# ``handWrittenTypes`` (``main.go:455-465``).
+HAND_WRITTEN_TYPES = {
+    "PlaybackRequest",  # _playback.py
+    "PlaybackResponse",  # _responses_extra.py
+    "TTSResponse",  # _responses_extra.py
+    "RecordingResponse",  # _responses_extra.py
+    "AddLegResponse",  # _responses_extra.py
+    "ICECandidatesResponse",  # _responses_extra.py
+    "WebRTCOfferResponse",  # _responses_extra.py
+    "APIError",  # _errors.py
+}
+
+
+def spec_refs(node: Any) -> set[str]:
+    """Every schema name reached by a local ``$ref`` anywhere under *node*.
+
+    Port of Go ``specRefs`` (``main.go:348-360``); walking the whole document
+    covers the same ground as Go's per-section walk (component schemas, path
+    operations, x-webhooks payloads).
+    """
+    out: set[str] = set()
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        # Schema refs only — ``#/components/parameters/LegId`` and friends name
+        # path parameters, not types, and must not become placeholder aliases.
+        if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+            name, _ = ref_tail(ref)
+            if name:
+                out.add(name)
+        for v in node.values():
+            out |= spec_refs(v)
+    elif isinstance(node, list):
+        for item in node:
+            out |= spec_refs(item)
+    return out
+
+
+def spec_placeholders(
+    openapi: dict[str, Any],
+    schemas: dict[str, dict[str, Any]],
+    async_defined: set[str],
+) -> list[str]:
+    """Class names referenced by the spec but declared nowhere.
+
+    A dangling ``$ref`` (e.g. a webhook payload pointing at a type nobody
+    wrote) would otherwise leave the generated modules referencing an undefined
+    name, so :func:`gen_models` aliases each of these to ``JsonValue``. Port of
+    the placeholder computation in Go ``main`` (``main.go:1777-1789``).
+    """
+    declared = {class_name(n) for n in schemas}
+    declared |= {class_name(n) for n in async_defined}
+    declared |= HAND_WRITTEN_TYPES
+    missing = {class_name(n) for n in spec_refs(openapi)} - declared
+    for name in sorted(missing):
+        print(
+            f"warning: {name} is referenced but not defined in the spec; "
+            "emitting a JsonValue alias",
+            file=sys.stderr,
+        )
+    return sorted(missing)
 
 
 def gen_models(
     schemas: dict[str, dict[str, Any]],
-    async_defined: set[str],
-) -> tuple[str, list[str]]:
+    placeholders: list[str],
+) -> str:
     """Emit ``_models.py``: enums + ``Leg`` + ``Room`` + placeholder aliases.
 
-    Returns the file source and the list of placeholder alias names emitted
-    (e.g. ``["OfferedCodec"]``), so downstream generators that reference them
-    can emit the right imports.
+    *placeholders* are the schema names the spec references but never defines
+    (see :func:`spec_placeholders`); each becomes a permissive ``JsonValue``
+    alias so the generated files that reference them still resolve.
     """
-    placeholders: list[str] = []
     e = Emitter()
     e.add_typing("TYPE_CHECKING")
     e.add_import("if TYPE_CHECKING:")
@@ -807,24 +859,17 @@ def gen_models(
             schemas["WebhookEventType"].get("enum") or [],
         )
 
-    # Placeholder aliases for schemas referenced but not fully defined in the
-    # OpenAPI spec. The Go generator skips schemas defined in asyncapi.yaml
-    # (``main.go:540-552``) because ``_vsi.py`` will emit the real struct,
-    # but ``_events.py`` references these types whenever an event includes a
-    # ``channels`` / ``offered_codecs`` field — so we always emit a permissive
-    # ``JsonValue`` alias here and let ``_events.py`` import from this module.
-    # When the M5 ``_vsi.py`` lands with concrete classes, downstream imports
-    # can swap to it; the placeholder remains a safe wire-level fallback.
-    for name in ("ChannelInfo", "OfferedCodec"):
-        if name in schemas:
-            continue
+    # Placeholder aliases for schemas the spec references but never defines (a
+    # dangling ``$ref``). Without a declaration the generated modules would
+    # reference an undefined name, so alias each to the permissive
+    # ``JsonValue``. Port of Go ``genModels``'s placeholder loop
+    # (``main.go:766-770``).
+    for name in placeholders:
         e.add_pydantic("JsonValue")
         e.line(f"# {name} is referenced in the spec but not fully defined; use JsonValue.")
         e.line(f"{name} = JsonValue")
         e.line("")
         e.line("")
-        placeholders.append(name)
-    _ = async_defined  # reserved for M5
 
     # Leg and Room with a private back-reference to the client.
     for name in ("Leg", "Room"):
@@ -845,29 +890,24 @@ def gen_models(
         )
 
     e.add_typing("Optional")
-    return e.finalize(), placeholders
+    return e.finalize()
 
 
 def gen_requests(schemas: dict[str, dict[str, Any]]) -> str:
-    """Emit ``_requests.py``: SIPAuth + all *Request types + hardcoded ICECandidateInit."""
+    """Emit ``_requests.py``: every component schema another pass doesn't own.
+
+    Mirrors Go ``genRequests`` (``main.go:791-812``): iterate ``components.schemas``
+    in declaration order, skip :data:`SCHEMAS_EMITTED_ELSEWHERE`, emit the rest.
+    Forward references between the emitted classes are fine — every generated
+    file starts with ``from __future__ import annotations`` and Pydantic defers
+    the model build until the name resolves.
+    """
     e = Emitter()
     e.add_pydantic("BaseModel", "ConfigDict", "Field")
     e.add_typing("Optional")
 
-    # SIPAuth — inline schema inside CreateLegRequest.auth, surfaced as its own type.
-    e.line("class SIPAuth(BaseModel):")
-    e.line('    """SIP digest authentication credentials."""')
-    e.line("    model_config = ConfigDict(populate_by_name=True, extra='ignore')")
-    e.line("")
-    e.line("    username: str = ''")
-    e.line("    password: str")
-    e.line("")
-    e.line("")
-
-    for name in REQUEST_SCHEMAS:
-        schema = schemas.get(name)
-        if not schema:
-            print(f"warning: schema {name!r} not found, skipping", file=sys.stderr)
+    for name, schema in schemas.items():
+        if name in SCHEMAS_EMITTED_ELSEWHERE:
             continue
         emit_class(
             e,
@@ -954,19 +994,24 @@ def _emit_nested_event_model(
     return nested_name
 
 
-def gen_events(
-    webhooks: dict[str, dict[str, Any]],
-    placeholders: list[str],
-) -> str:
+def gen_events(webhooks: dict[str, dict[str, Any]]) -> str:
     """Emit ``_events.py``: base Event + one class per x-webhooks entry + parse_event."""
     e = Emitter()
     e.add_pydantic("BaseModel", "ConfigDict", "Field")
     e.add_typing("Any", "Optional")
     e.add_import("import json")
     e.add_import("from datetime import datetime")
-    if placeholders:
-        names = ", ".join(placeholders)
-        e.add_import(f"from voiceblender._models import {names}")
+
+    # Event payloads ``$ref`` shared component schemas (ParticipantInfo,
+    # SIPRECStream, STTWord, …). Go needs no imports for those — one package —
+    # but Python must pull each one in from the module that declares it.
+    # ``WebhookEvent`` is the envelope this file emits itself as ``Event``.
+    referenced = {class_name(n) for n in spec_refs(webhooks)} - {"WebhookEvent"}
+    by_module: dict[str, list[str]] = {}
+    for cls in sorted(referenced):
+        by_module.setdefault(_model_module(cls), []).append(cls)
+    for mod, names in sorted(by_module.items()):
+        e.add_import(f"from {mod} import {', '.join(names)}")
 
     # Base envelope. ``type`` is a plain ``str`` (not WebhookEventType) so
     # unknown event types parse permissively — parity with the Go
@@ -1092,12 +1137,11 @@ def gen_events(
 # ``client.get_leg(id)``, not ``leg.get(...)``).
 
 
-# Names of every top-level *Request type — used to decide whether to import
-# from _requests.py vs _responses(_extra).py.
-_REQUEST_CLASS_NAMES = {class_name(n) for n in REQUEST_SCHEMAS} | {
-    "ICECandidateInit",
-    "SIPAuth",
-}
+# Every class name emitted into _requests.py — used to decide whether to import
+# a referenced type from _requests.py vs _models/_responses(_extra)/_vsi.
+# Populated in main() from the openapi component schemas (see gen_requests);
+# ICECandidateInit is the one class gen_requests hardcodes.
+_REQUEST_CLASS_NAMES: set[str] = {"ICECandidateInit"}
 
 # Response types that live in _responses_extra.py (hand-written), not _responses.py.
 _RESPONSES_EXTRA_CLASSES = {
@@ -1303,6 +1347,10 @@ def _model_module(class_name_: str) -> str:
         return "voiceblender._playback"
     if class_name_ in _RESPONSES_EXTRA_CLASSES:
         return "voiceblender._responses_extra"
+    if class_name_ == "APIError":
+        # The spec's ``Error`` body schema; hand-written in _errors.py with the
+        # HTTP status code attached (TYPE_RENAMES maps Error → APIError).
+        return "voiceblender._errors"
     if class_name_ in _REQUEST_CLASS_NAMES:
         return "voiceblender._requests"
     if class_name_ in ("Leg", "Room"):
@@ -1580,6 +1628,18 @@ def _frame_field_type(
     return _vsi_schema_py_type(field_schema, async_schemas, open_schemas), True
 
 
+def _vsi_skip(name: str, open_schemas: dict[str, Any]) -> bool:
+    """True if the asyncapi schema *name* is already declared outside ``_vsi.py``.
+
+    A schema declared in both specs (``BridgeView``, ``TrunkView``,
+    ``RoutingRowUpdate``, …) is emitted once from openapi — into ``_requests.py``
+    or ``_models.py`` — and imported here. Port of Go ``genVSI``'s ``vsiSkip``
+    closure (``main.go:1603-1605``).
+    """
+    cls = class_name(name)
+    return cls in {class_name(n) for n in open_schemas} or cls in HAND_WRITTEN_TYPES
+
+
 def gen_vsi(
     async_spec: dict[str, Any],
     open_schemas: dict[str, Any],
@@ -1594,16 +1654,17 @@ def gen_vsi(
 
     # 1. Emit Pydantic models for every async schema, deterministic order.
     #
-    # Mirrors Go ``genVSI`` (``main.go:1421-1440``) — schemas that *also* appear
-    # in openapi.yaml are NOT skipped here, because the matching name isn't
-    # emitted in _models.py either (gen_models only emits Leg/Room +
-    # placeholders). VSI_SKIP_SCHEMAS covers the rare names that ARE emitted
-    # elsewhere (ICECandidateInit in _requests.py, WebRTCOfferRequest likewise).
+    # Mirrors Go ``genVSI`` (``main.go:1602-1633``): a schema declared in both
+    # specs is emitted once — from openapi, in _requests.py / _models.py — and
+    # skipped here, so _vsi.py imports the existing class instead of
+    # redeclaring it. Comparison is on the final Python class name, since
+    # asyncapi names are lowerCamelCase and some openapi names are renamed.
+    skipped = [n for n in async_schemas if _vsi_skip(n, open_schemas)]
     e.line("# ── VSI payload / result schemas ──────────────────────────────────────")
     e.line("")
     sorted_names = sorted(async_schemas.keys(), key=class_name)
     for name in sorted_names:
-        if name in VSI_SKIP_SCHEMAS:
+        if name in skipped:
             continue
         schema = async_schemas[name]
         # Match Go's permissive JSON decoding for VSI **responses**: the live
@@ -1633,13 +1694,12 @@ def gen_vsi(
         if isinstance(msg, dict):
             _collect_open_refs(msg, open_schemas, referenced_open)
     # Same-file refs to skipped VSI schemas need explicit imports too.
-    for name in VSI_SKIP_SCHEMAS:
+    for name in skipped:
         if _async_schema_referenced(name, async_schemas, async_spec):
             referenced_open.add(class_name(name))
     # Don't import types that are emitted locally in this _vsi.py — they're
-    # already in scope. (BridgeView etc. live in both async and open schemas
-    # but we emit the asyncapi version here.)
-    locally_emitted = {class_name(n) for n in async_schemas if n not in VSI_SKIP_SCHEMAS}
+    # already in scope.
+    locally_emitted = {class_name(n) for n in async_schemas if n not in skipped}
     referenced_open -= locally_emitted
     if referenced_open:
         # Some openapi classes live in _requests, _models, or _responses_extra.
@@ -1825,23 +1885,27 @@ def main() -> int:
     paths: dict[str, dict[str, Any]] = openapi.get("paths") or {}
     webhooks: dict[str, dict[str, Any]] = openapi.get("x-webhooks") or {}
 
+    # Every class _requests.py declares, so _model_module routes references to
+    # it (rather than to _models) — the counterpart of gen_requests' loop.
+    _REQUEST_CLASS_NAMES.update(
+        class_name(n) for n in schemas if n not in SCHEMAS_EMITTED_ELSEWHERE
+    )
+
     async_defined: set[str] = set()
     async_spec: dict[str, Any] | None = None
     if args.asyncapi is not None:
         async_spec = load_yaml(args.asyncapi)
         async_defined = set((async_spec.get("components") or {}).get("schemas") or {})
         # Record which class names _vsi.py will emit so _model_module can route
-        # HTTP method files' imports (e.g. RoomRoutingView) to _vsi. Mirrors the
-        # ``locally_emitted`` set computed in gen_vsi.
-        _VSI_CLASS_NAMES.update(
-            class_name(n) for n in async_defined if n not in VSI_SKIP_SCHEMAS
-        )
+        # HTTP method files' imports (e.g. PlaybackStartResult) to _vsi. Mirrors
+        # the ``locally_emitted`` set computed in gen_vsi.
+        _VSI_CLASS_NAMES.update(class_name(n) for n in async_defined if not _vsi_skip(n, schemas))
 
-    models_src, placeholders = gen_models(schemas, async_defined)
-    write(out / "_models.py", models_src)
+    placeholders = spec_placeholders(openapi, schemas, async_defined)
+    write(out / "_models.py", gen_models(schemas, placeholders))
     write(out / "_requests.py", gen_requests(schemas))
     write(out / "_responses.py", gen_responses(schemas))
-    write(out / "_events.py", gen_events(webhooks, placeholders))
+    write(out / "_events.py", gen_events(webhooks))
 
     # M4: paths → _legs / _rooms / _webrtc.
     ops = extract_operations(paths)

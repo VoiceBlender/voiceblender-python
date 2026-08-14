@@ -7,14 +7,28 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field
 
+from voiceblender._models import Leg, Room
 from voiceblender._requests import (
+    AnswerLegStream,
+    BridgeView,
+    ChannelInfo,
     CreateLegRequest,
     CreateRoomRequest,
+    CreateTrunkRequest,
+    CreateTrunkResponse,
     ICECandidateInit,
+    LegStreamView,
+    RegistrationsResponse,
+    RoomRoutingView,
     RoutingRowUpdate,
+    SIPRECSessionView,
+    TrunksListResponse,
+    TrunkView,
+    WebRTCCandidatesResult,
     WebRTCOfferRequest,
+    WebRTCOfferResult,
 )
 from voiceblender._stream import EventStream
 
@@ -158,6 +172,7 @@ class AnswerLegPayload(BaseModel):
     id: str
     speech_detection: bool | None = None
     codec: str | None = None
+    streams: list[AnswerLegStream] | None = None
 
 
 class BridgeCreatePayload(BaseModel):
@@ -198,17 +213,6 @@ class BridgeUpdatePayload(BaseModel):
     direction: str
 
 
-class BridgeView(BaseModel):
-    """BridgeView."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    id: str
-    room_id: str
-    direction: str
-    sample_rate: int
-
-
 class ChallengeLegPayload(BaseModel):
     """ChallengeLegPayload."""
 
@@ -239,16 +243,6 @@ class ChallengeRegistrationPayload(BaseModel):
     max_expires: int | None = None
 
 
-class ChannelInfo(BaseModel):
-    """ChannelInfo."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    channel: int
-    start_ms: int
-    end_ms: int
-
-
 class CompleteTransferPayload(BaseModel):
     """CompleteTransferPayload."""
 
@@ -258,27 +252,6 @@ class CompleteTransferPayload(BaseModel):
     success: bool
     status_code: int | None = None
     reason: str | None = None
-
-
-class CreateTrunkRequest(BaseModel):
-    """CreateTrunkRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    type: str
-    app_id: str | None = None
-    sip_register: SIPRegisterTrunkSpec | None = None
-    ip_ip: IPIPTrunkSpec | None = None
-
-
-class CreateTrunkResponse(BaseModel):
-    """CreateTrunkResponse."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    id: str | None = None
-    type: str | None = None
-    status: str | None = None
 
 
 class DTMFPayload(BaseModel):
@@ -335,22 +308,6 @@ class IDPayload(BaseModel):
     id: str
 
 
-class IPIPTrunkSpec(BaseModel):
-    """IPIPTrunkSpec."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    peer_uri: str | None = None
-
-
-class IPIPTrunkView(BaseModel):
-    """IPIPTrunkView."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    peer_uri: str | None = None
-
-
 class LegAMDStartPayload(BaseModel):
     """LegAMDStartPayload."""
 
@@ -363,6 +320,50 @@ class LegAMDStartPayload(BaseModel):
     total_analysis_time: int | None = None
     minimum_word_length: int | None = None
     beep_timeout: int | None = None
+
+
+class LegStreamAddPayload(BaseModel):
+    """LegStreamAddPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str
+    direction: str | None = None
+    lang: str | None = None
+    content: str | None = None
+    label: str | None = None
+    room_id: str | None = None
+    role: str | None = None
+
+
+class LegStreamPayload(BaseModel):
+    """LegStreamPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str
+    stream_id: str
+
+
+class LegStreamRoomPayload(BaseModel):
+    """LegStreamRoomPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str
+    stream_id: str
+    room_id: str
+    role: str | None = None
+
+
+class LegStreamUpdatePayload(BaseModel):
+    """LegStreamUpdatePayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str
+    stream_id: str
+    role: str | None = None
 
 
 class PlaybackStartPayload(BaseModel):
@@ -447,6 +448,9 @@ class RecordStartPayload(BaseModel):
     s_3_prefix: str = Field(alias="s3_prefix")
     s_3_access_key: str = Field(alias="s3_access_key")
     s_3_secret_key: str = Field(alias="s3_secret_key")
+    gcs_bucket: str
+    gcs_object_name_prefix: str
+    filename: str
 
 
 class RecordingPauseResumeResult(BaseModel):
@@ -484,32 +488,7 @@ class RecordingStopRoomResult(BaseModel):
     file: str | None = None
     multi_channel_file: str | None = None
     channels: dict[str, ChannelInfo] | None = None
-
-
-class RegistrationView(BaseModel):
-    """RegistrationView."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    aor: str
-    contact: str
-    socket: str
-    transport: str
-    user_agent: str | None = None
-    call_id: str | None = None
-    app_id: str | None = None
-    created_at: str
-    last_refresh: str
-    expires_at: str
-    granted_expires_seconds: int
-
-
-class RegistrationsResponse(BaseModel):
-    """RegistrationsResponse."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    bindings: list[RegistrationView] | None = None
+    omitted_legs: list[str] | None = None
 
 
 class RejectRegistrationPayload(BaseModel):
@@ -549,43 +528,27 @@ class RoomRoutingUpdatePayload(BaseModel):
     updates: list[RoutingRowUpdate]
 
 
-class RoomRoutingView(BaseModel):
-    """RoomRoutingView."""
+class RoomSIPRECStartPayload(BaseModel):
+    """RoomSIPRECStartPayload."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    matrix: dict[str, list[str]]
+    id: str
+    srs_uri: str
+    leg_ids: list[str] | None = None
+    session_id: str | None = None
+    app_id: str | None = None
+    auth_username: str | None = None
+    auth_password: str | None = None
+    headers: dict[str, str] | None = None
 
 
-class SIPRegisterTrunkSpec(BaseModel):
-    """SIPRegisterTrunkSpec."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    registrar_uri: str
-    aor: str
-    username: str | None = None
-    password: str
-    contact_user: str | None = None
-    expires_seconds: int | None = None
-
-
-class SIPRegisterTrunkView(BaseModel):
-    """SIPRegisterTrunkView."""
+class STTFinalizeResult(BaseModel):
+    """STTFinalizeResult."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    registrar_uri: str
-    aor: str
-    username: str | None = None
-    contact_uri: str | None = None
-    requested_expires_seconds: int
-    granted_expires_seconds: int | None = None
-    last_registered_at: str | None = None
-    next_refresh_at: str | None = None
-    call_id: str | None = None
-    cseq: int | None = None
-    source_address: str | None = None
+    status: str | None = None
 
 
 class STTStartLegResult(BaseModel):
@@ -607,6 +570,14 @@ class STTStartPayload(BaseModel):
     partial: bool
     provider: str | None = None
     api_key: str | None = None
+    model: str | None = None
+    keyterms: list[str] | None = None
+    endpointing: int | None = None
+    utterance_end_ms: int | None = None
+    eager_eot_threshold: float | None = None
+    eot_threshold: float | None = None
+    eot_timeout_ms: int | None = None
+    language_hints: list[str] | None = None
 
 
 class STTStartRoomResult(BaseModel):
@@ -636,6 +607,14 @@ class SetLegRolePayload(BaseModel):
     role: str
 
 
+class TTSDiscardResult(BaseModel):
+    """TTSDiscardResult."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    status: str | None = None
+
+
 class TTSStartPayload(BaseModel):
     """TTSStartPayload."""
 
@@ -661,6 +640,15 @@ class TTSStartResult(BaseModel):
     status: str | None = None
 
 
+class TTSTargetPayload(BaseModel):
+    """TTSTargetPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    tts_id: str
+
+
 class TransferLegPayload(BaseModel):
     """TransferLegPayload."""
 
@@ -677,29 +665,6 @@ class TransferLegResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     status: str | None = None
-
-
-class TrunkView(BaseModel):
-    """TrunkView."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    id: str
-    type: str
-    app_id: str | None = None
-    status: str
-    last_error: str | None = None
-    created_at: str
-    sip_register: SIPRegisterTrunkView | None = None
-    ip_ip: IPIPTrunkView | None = None
-
-
-class TrunksListResponse(BaseModel):
-    """TrunksListResponse."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    trunks: list[TrunkView] | None = None
 
 
 class VSIStatusResponse(BaseModel):
@@ -719,28 +684,10 @@ class VSIWebRTCAddCandidatePayload(BaseModel):
     candidate: ICECandidateInit
 
 
-class WebRTCCandidatesResult(BaseModel):
-    """WebRTCCandidatesResult."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    candidates: list[ICECandidateInit] | None = None
-    done: bool | None = None
-
-
-class WebRTCOfferResult(BaseModel):
-    """WebRTCOfferResult."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    leg_id: str | None = None
-    sdp: str | None = None
-
-
 # ── VSI command methods on EventStream ────────────────────────────────
 
 
-async def _vsi_list_legs(self: EventStream) -> list[JsonValue]:
+async def _vsi_list_legs(self: EventStream) -> list[Leg]:
     """List all active legs"""
     return await self._call("list_legs", None)  # type: ignore[no-any-return]
 
@@ -748,17 +695,19 @@ async def _vsi_list_legs(self: EventStream) -> list[JsonValue]:
 EventStream.list_legs = _vsi_list_legs  # type: ignore[method-assign]
 
 
-async def _vsi_get_leg(self: EventStream, payload: IDPayload) -> JsonValue:
+async def _vsi_get_leg(self: EventStream, payload: IDPayload) -> Leg:
     """Get a single leg by id"""
-    return await self._call("get_leg", payload)  # type: ignore[no-any-return]
+    out = await self._call("get_leg", payload, result_model=Leg)
+    return out  # type: ignore[no-any-return]
 
 
 EventStream.get_leg = _vsi_get_leg  # type: ignore[method-assign]
 
 
-async def _vsi_create_leg(self: EventStream, payload: CreateLegRequest) -> JsonValue:
+async def _vsi_create_leg(self: EventStream, payload: CreateLegRequest) -> Leg:
     """Originate an outbound leg"""
-    return await self._call("create_leg", payload)  # type: ignore[no-any-return]
+    out = await self._call("create_leg", payload, result_model=Leg)
+    return out  # type: ignore[no-any-return]
 
 
 EventStream.create_leg = _vsi_create_leg  # type: ignore[method-assign]
@@ -921,7 +870,7 @@ async def _vsi_webrtc_get_candidates(
 EventStream.webrtc_get_candidates = _vsi_webrtc_get_candidates  # type: ignore[method-assign]
 
 
-async def _vsi_list_rooms(self: EventStream) -> list[JsonValue]:
+async def _vsi_list_rooms(self: EventStream) -> list[Room]:
     """List all rooms"""
     return await self._call("list_rooms", None)  # type: ignore[no-any-return]
 
@@ -929,17 +878,19 @@ async def _vsi_list_rooms(self: EventStream) -> list[JsonValue]:
 EventStream.list_rooms = _vsi_list_rooms  # type: ignore[method-assign]
 
 
-async def _vsi_get_room(self: EventStream, payload: IDPayload) -> JsonValue:
+async def _vsi_get_room(self: EventStream, payload: IDPayload) -> Room:
     """Get a single room by id"""
-    return await self._call("get_room", payload)  # type: ignore[no-any-return]
+    out = await self._call("get_room", payload, result_model=Room)
+    return out  # type: ignore[no-any-return]
 
 
 EventStream.get_room = _vsi_get_room  # type: ignore[method-assign]
 
 
-async def _vsi_create_room(self: EventStream, payload: CreateRoomRequest) -> JsonValue:
+async def _vsi_create_room(self: EventStream, payload: CreateRoomRequest) -> Room:
     """Create a room"""
-    return await self._call("create_room", payload)  # type: ignore[no-any-return]
+    out = await self._call("create_room", payload, result_model=Room)
+    return out  # type: ignore[no-any-return]
 
 
 EventStream.create_room = _vsi_create_room  # type: ignore[method-assign]
@@ -1049,12 +1000,108 @@ async def _vsi_room_routing_update(
 EventStream.room_routing_update = _vsi_room_routing_update  # type: ignore[method-assign]
 
 
-async def _vsi_set_leg_role(self: EventStream, payload: SetLegRolePayload) -> JsonValue:
+async def _vsi_set_leg_role(self: EventStream, payload: SetLegRolePayload) -> Leg:
     """Change a leg's routing role (recomputes the room matrix if the leg is in a room)"""
-    return await self._call("set_leg_role", payload)  # type: ignore[no-any-return]
+    out = await self._call("set_leg_role", payload, result_model=Leg)
+    return out  # type: ignore[no-any-return]
 
 
 EventStream.set_leg_role = _vsi_set_leg_role  # type: ignore[method-assign]
+
+
+async def _vsi_leg_stream_list(self: EventStream, payload: IDPayload) -> list[LegStreamView]:
+    """List a SIP leg's negotiated audio streams"""
+    return await self._call("leg_stream_list", payload)  # type: ignore[no-any-return]
+
+
+EventStream.leg_stream_list = _vsi_leg_stream_list  # type: ignore[method-assign]
+
+
+async def _vsi_leg_stream_get(self: EventStream, payload: LegStreamPayload) -> LegStreamView:
+    """Get one of a SIP leg's audio streams"""
+    out = await self._call("leg_stream_get", payload, result_model=LegStreamView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_stream_get = _vsi_leg_stream_get  # type: ignore[method-assign]
+
+
+async def _vsi_leg_stream_add(self: EventStream, payload: LegStreamAddPayload) -> LegStreamView:
+    """Negotiate an additional m=audio section on a live dialog via re-INVITE"""
+    out = await self._call("leg_stream_add", payload, result_model=LegStreamView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_stream_add = _vsi_leg_stream_add  # type: ignore[method-assign]
+
+
+async def _vsi_leg_stream_update(
+    self: EventStream, payload: LegStreamUpdatePayload
+) -> LegStreamView:
+    """Change one of a leg's audio streams' routing role in place"""
+    out = await self._call("leg_stream_update", payload, result_model=LegStreamView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_stream_update = _vsi_leg_stream_update  # type: ignore[method-assign]
+
+
+async def _vsi_leg_stream_remove(self: EventStream, payload: LegStreamPayload) -> VSIStatusResponse:
+    """Disable one of a leg's audio streams with a port-0 re-INVITE"""
+    out = await self._call("leg_stream_remove", payload, result_model=VSIStatusResponse)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_stream_remove = _vsi_leg_stream_remove  # type: ignore[method-assign]
+
+
+async def _vsi_leg_stream_attach_room(
+    self: EventStream, payload: LegStreamRoomPayload
+) -> LegStreamView:
+    """Mix one of a leg's audio streams into a room (may differ from the leg's own room)"""
+    out = await self._call("leg_stream_attach_room", payload, result_model=LegStreamView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_stream_attach_room = _vsi_leg_stream_attach_room  # type: ignore[method-assign]
+
+
+async def _vsi_leg_stream_detach_room(
+    self: EventStream, payload: LegStreamPayload
+) -> LegStreamView:
+    """Remove one of a leg's audio streams from whichever room mixes it"""
+    out = await self._call("leg_stream_detach_room", payload, result_model=LegStreamView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_stream_detach_room = _vsi_leg_stream_detach_room  # type: ignore[method-assign]
+
+
+async def _vsi_leg_siprec_start(self: EventStream, payload: RoomSIPRECStartPayload) -> Leg:
+    """Fork a single call to an external SIPREC recording server"""
+    out = await self._call("leg_siprec_start", payload, result_model=Leg)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_siprec_start = _vsi_leg_siprec_start  # type: ignore[method-assign]
+
+
+async def _vsi_room_siprec_start(self: EventStream, payload: RoomSIPRECStartPayload) -> Leg:
+    """Fork a room's participants to an external SIPREC recording server"""
+    out = await self._call("room_siprec_start", payload, result_model=Leg)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.room_siprec_start = _vsi_room_siprec_start  # type: ignore[method-assign]
+
+
+async def _vsi_siprec_get(self: EventStream, payload: IDPayload) -> SIPRECSessionView:
+    """Get an inbound SIPREC recording session's participants, streams and metadata"""
+    out = await self._call("siprec_get", payload, result_model=SIPRECSessionView)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.siprec_get = _vsi_siprec_get  # type: ignore[method-assign]
 
 
 async def _vsi_leg_ring(self: EventStream, payload: IDPayload) -> VSIStatusResponse:
@@ -1270,6 +1317,15 @@ async def _vsi_room_stt_stop(self: EventStream, payload: IDPayload) -> STTStopRe
 EventStream.room_stt_stop = _vsi_room_stt_stop  # type: ignore[method-assign]
 
 
+async def _vsi_leg_stt_finalize(self: EventStream, payload: IDPayload) -> STTFinalizeResult:
+    """Flush the speech-to-text buffer on a leg and emit a final transcript without stopping STT"""
+    out = await self._call("leg_stt_finalize", payload, result_model=STTFinalizeResult)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_stt_finalize = _vsi_leg_stt_finalize  # type: ignore[method-assign]
+
+
 async def _vsi_leg_tts(self: EventStream, payload: TTSStartPayload) -> TTSStartResult:
     """Synthesize speech and play it on a leg"""
     out = await self._call("leg_tts", payload, result_model=TTSStartResult)
@@ -1277,6 +1333,33 @@ async def _vsi_leg_tts(self: EventStream, payload: TTSStartPayload) -> TTSStartR
 
 
 EventStream.leg_tts = _vsi_leg_tts  # type: ignore[method-assign]
+
+
+async def _vsi_leg_tts_preflight(self: EventStream, payload: TTSStartPayload) -> TTSStartResult:
+    """Synthesize speech and hold it for a later commit"""
+    out = await self._call("leg_tts_preflight", payload, result_model=TTSStartResult)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_tts_preflight = _vsi_leg_tts_preflight  # type: ignore[method-assign]
+
+
+async def _vsi_leg_tts_commit(self: EventStream, payload: TTSTargetPayload) -> TTSStartResult:
+    """Play a staged TTS utterance"""
+    out = await self._call("leg_tts_commit", payload, result_model=TTSStartResult)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_tts_commit = _vsi_leg_tts_commit  # type: ignore[method-assign]
+
+
+async def _vsi_leg_tts_discard(self: EventStream, payload: TTSTargetPayload) -> TTSDiscardResult:
+    """Drop a staged TTS utterance without playing it"""
+    out = await self._call("leg_tts_discard", payload, result_model=TTSDiscardResult)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.leg_tts_discard = _vsi_leg_tts_discard  # type: ignore[method-assign]
 
 
 async def _vsi_room_tts(self: EventStream, payload: TTSStartPayload) -> TTSStartResult:

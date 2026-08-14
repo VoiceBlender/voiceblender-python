@@ -9,9 +9,11 @@ from voiceblender._client import Client
 from voiceblender._models import Leg, Room
 from voiceblender._playback import PlaybackRequest
 from voiceblender._requests import (
+    AddLegStreamRequest,
     AgentMessageRequest,
     AMDParams,
     AnswerLegRequest,
+    AttachStreamRoomRequest,
     ChallengeRequest,
     CreateLegRequest,
     DeepgramAgentRequest,
@@ -19,16 +21,20 @@ from voiceblender._requests import (
     DTMFRequest,
     EarlyMediaLegRequest,
     ElevenLabsAgentRequest,
+    LegStreamView,
     PipecatAgentRequest,
     RecordingRequest,
     RTTRequest,
     SetLegRoleRequest,
+    SIPRECSessionView,
+    StartSIPRECRequest,
     STTRequest,
     TransferCompleteRequest,
     TransferDeclineRequest,
     TransferProgressRequest,
     TransferRequest,
     TTSRequest,
+    UpdateLegStreamRequest,
     VAPIAgentRequest,
     VolumeRequest,
 )
@@ -112,7 +118,7 @@ Leg.hangup = _leg_hangup  # type: ignore[method-assign]
 async def _leg_answer(self: Leg, req: AnswerLegRequest) -> StatusResponse:
     """Answer a ringing or early-media inbound SIP leg (asynchronous)
 
-    Signals the inbound-call goroutine to send 200 OK. The HTTP call returns 202 immediately; the actual SIP 200 OK is sent in the background, and the leg's transition is observed via `leg.connected`. Pre-condition failures (wrong state, unknown codec) still return 4xx synchronously.
+    Signals the inbound-call goroutine to send 200 OK. The HTTP call returns 202 immediately; the actual SIP 200 OK is sent in the background, and the leg's transition is observed via `leg.connected`. Pre-condition failures (wrong state, unknown codec) still return 4xx synchronously. When the caller offers several m=audio sections they are all accepted; `streams` optionally routes each accepted stream beyond the primary into its own room, applied once the answer is negotiated.
     """
     if self._client is None:
         raise RuntimeError(f"{type(self).__name__} not bound to a Client")
@@ -442,6 +448,54 @@ async def _leg_play_tts(self: Leg, req: TTSRequest) -> TTSResponse:
 Leg.play_tts = _leg_play_tts  # type: ignore[method-assign]
 
 
+async def _leg_preflight_tts_leg(self: Leg, req: TTSRequest) -> StatusResponse:
+    """Synthesize speech and hold it for a later commit
+
+    Stages a speculative reply. The audio is synthesized and buffered in memory but not played, so that committing it starts playback with no synthesis delay. Intended for the turn-taking loop of a voice agent: start a draft reply on the `eager_end_of_turn` `stt.turn` event, then commit it on `end_of_turn` or discard it on `turn_resumed`. A `tts.staged` event reports when the audio is ready; synthesis failures are reported on `tts.error`. Staged utterances are dropped after `TTS_PREFLIGHT_TTL` or when the leg ends, and at most `TTS_PREFLIGHT_MAX_PER_LEG` may be staged on one leg at a time. Preflight is leg-scoped; use `POST /rooms/{id}/tts` for room announcements.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/tts/preflight", body=req, out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.preflight_tts_leg = _leg_preflight_tts_leg  # type: ignore[method-assign]
+
+
+async def _leg_commit_tts_leg(self: Leg, tts_id: str) -> StatusResponse:
+    """Play a staged TTS utterance
+
+    Starts playback of an utterance staged by the preflight endpoint. Returns immediately, before synthesis has necessarily finished; failure is reported asynchronously on `tts.error`, exactly as for `POST /legs/{id}/tts`. Once committed, stop playback with `DELETE /legs/{id}/play/{playbackID}` using the same `tts_id`.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/tts/{tts_id}/commit", out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.commit_tts_leg = _leg_commit_tts_leg  # type: ignore[method-assign]
+
+
+async def _leg_discard_tts_leg(self: Leg, tts_id: str) -> StatusResponse:
+    """Drop a staged TTS utterance without playing it
+
+    Discards an utterance staged by the preflight endpoint, aborting synthesis if it is still in flight. Already-committed utterances are stopped with `DELETE /legs/{id}/play/{playbackID}` instead.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "DELETE", f"/legs/{self.id}/tts/{tts_id}", out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.discard_tts_leg = _leg_discard_tts_leg  # type: ignore[method-assign]
+
+
 async def _leg_record(self: Leg, req: RecordingRequest) -> RecordingResponse:
     """Start recording a leg to a WAV file
 
@@ -519,6 +573,20 @@ async def _leg_stop_stt(self: Leg) -> StatusResponse:
 
 
 Leg.stop_stt = _leg_stop_stt  # type: ignore[method-assign]
+
+
+async def _leg_finalize_stt_leg(self: Leg) -> StatusResponse:
+    """Flush the STT buffer on a leg without stopping STT
+
+    Forces the provider to emit a final transcript for the audio buffered so far while the session keeps running, so a caller that knows the speaker has finished does not have to wait for the provider's own endpointing. Only the `deepgram` provider supports this; `deepgram_flux`, `azure` and `elevenlabs` answer 501 — /v2/listen has no flush message, and Flux reports turn ends itself on stt.turn. The flushed transcript arrives on the usual stt.text event with is_final true — a segment containing no speech produces no event at all, so do not block on one.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("POST", f"/legs/{self.id}/stt/finalize", out_model=StatusResponse)
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.finalize_stt_leg = _leg_finalize_stt_leg  # type: ignore[method-assign]
 
 
 async def _leg_elevenlabs_agent(self: Leg, req: ElevenLabsAgentRequest) -> StatusResponse:
@@ -621,6 +689,152 @@ async def _leg_start_amd(self: Leg, req: AMDParams) -> StatusResponse:
 
 
 Leg.start_amd = _leg_start_amd  # type: ignore[method-assign]
+
+
+async def _leg_get_siprec_session(self: Leg) -> SIPRECSessionView:
+    """Get a SIPREC recording session
+
+    Returns the RFC 7865 recording metadata of an inbound SIPREC session (leg type `siprec_in`): every recorded participant, every negotiated media stream, and the binding between them. A stream's `a=label` is what ties the m= section to a participant, so the `streams` entries carry both the leg stream ID and the participant identity. The raw metadata document is returned verbatim in `metadata`.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("GET", f"/legs/{self.id}/siprec", out_model=SIPRECSessionView)
+    assert out is not None, "getSIPRECSession" + ": empty response"
+    return out
+
+
+Leg.get_siprec_session = _leg_get_siprec_session  # type: ignore[method-assign]
+
+
+async def _leg_start_leg_siprec(self: Leg, req: StartSIPRECRequest) -> Leg:
+    """Fork a single call to an external SIPREC recording server
+
+    Originates a SIPREC recording session (RFC 7866) carrying one call as two `sendonly` sections: what the far end says, and what this server sends them. No room is involved. `leg_ids` is ignored here — the two sections are fixed. Returns the resulting `siprec_out` leg; delete it to end the session. Requires `SIPREC_SRC_ENABLED=true`.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("POST", f"/legs/{self.id}/siprec", body=req, out_model=Leg)
+    if out is not None:
+        out._client = self._client
+    assert out is not None, "startLegSIPREC" + ": empty response"
+    return out
+
+
+Leg.start_leg_siprec = _leg_start_leg_siprec  # type: ignore[method-assign]
+
+
+async def _leg_list_leg_streams(self: Leg) -> list[LegStreamView]:
+    """List a leg's audio streams
+
+    Returns every negotiated m=audio section on the leg, in m-line order. A single-stream call has exactly one entry, the primary.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    return await self._client._do_list("GET", f"/legs/{self.id}/streams", item_model=LegStreamView)
+
+
+Leg.list_leg_streams = _leg_list_leg_streams  # type: ignore[method-assign]
+
+
+async def _leg_add_leg_stream(self: Leg, req: AddLegStreamRequest) -> LegStreamView:
+    """Add an audio stream to a live call
+
+    Negotiates an additional m=audio section with a re-INVITE (RFC 3264 §8.1). The new section is appended below the existing ones and binds its own RTP port. Use it to carry a second independent audio stream — a translated feed, for example — alongside the original. Set `content` to "alt" and `lang` to the feed's language so the peer can tell them apart. A peer that answers the new section with port 0 leaves the call untouched and this returns 409.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/streams", body=req, out_model=LegStreamView
+    )
+    assert out is not None, "addLegStream" + ": empty response"
+    return out
+
+
+Leg.add_leg_stream = _leg_add_leg_stream  # type: ignore[method-assign]
+
+
+async def _leg_get_leg_stream(self: Leg, stream_id: str) -> LegStreamView:
+    """Get one of a leg's audio streams"""
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "GET", f"/legs/{self.id}/streams/{stream_id}", out_model=LegStreamView
+    )
+    assert out is not None, "getLegStream" + ": empty response"
+    return out
+
+
+Leg.get_leg_stream = _leg_get_leg_stream  # type: ignore[method-assign]
+
+
+async def _leg_update_leg_stream(
+    self: Leg, stream_id: str, req: UpdateLegStreamRequest
+) -> LegStreamView:
+    """Change an audio stream's routing role
+
+    Updates the stream's role in place and, when the stream is mixed into a room, recomputes that room's matrix-derived allow-sets atomically (single mixer-mutex acquisition), so no audio bleeds through mid-change. Emits `leg.stream_role_changed` and `room.routing_changed` with `reason: leg_stream_role_changed`.
+
+    Only the role is mutable here. The SDP-level attributes — direction, lang, content, label — are fixed when the stream is negotiated; change them by removing the stream and adding a new one.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "PATCH", f"/legs/{self.id}/streams/{stream_id}", body=req, out_model=LegStreamView
+    )
+    assert out is not None, "updateLegStream" + ": empty response"
+    return out
+
+
+Leg.update_leg_stream = _leg_update_leg_stream  # type: ignore[method-assign]
+
+
+async def _leg_remove_leg_stream(self: Leg, stream_id: str) -> StatusResponse:
+    """Remove an audio stream from a live call
+
+    Disables the stream with a re-INVITE carrying port 0 for its section (RFC 3264 §8.2) and releases its RTP port. The m-line slot survives as a tombstone — the m-line count never decreases for the life of a dialog — so a later added stream takes a new position. The primary stream carries the call and cannot be removed.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "DELETE", f"/legs/{self.id}/streams/{stream_id}", out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.remove_leg_stream = _leg_remove_leg_stream  # type: ignore[method-assign]
+
+
+async def _leg_attach_leg_stream_room(
+    self: Leg, stream_id: str, req: AttachStreamRoomRequest
+) -> LegStreamView:
+    """Mix an audio stream into a room
+
+    Attaches one of the leg's secondary streams to a room, which may differ from the leg's own room — that is what lets an original audio stream and a translated one be mixed separately. A leg never hears its own other streams, whatever the routing matrix says.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/streams/{stream_id}/room", body=req, out_model=LegStreamView
+    )
+    assert out is not None, "attachLegStreamRoom" + ": empty response"
+    return out
+
+
+Leg.attach_leg_stream_room = _leg_attach_leg_stream_room  # type: ignore[method-assign]
+
+
+async def _leg_detach_leg_stream_room(self: Leg, stream_id: str) -> LegStreamView:
+    """Remove an audio stream from its room"""
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "DELETE", f"/legs/{self.id}/streams/{stream_id}/room", out_model=LegStreamView
+    )
+    assert out is not None, "detachLegStreamRoom" + ": empty response"
+    return out
+
+
+Leg.detach_leg_stream_room = _leg_detach_leg_stream_room  # type: ignore[method-assign]
 
 
 async def _leg_set_role(self: Leg, req: SetLegRoleRequest) -> Leg:

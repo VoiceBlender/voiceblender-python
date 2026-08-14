@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from voiceblender._models import ChannelInfo, OfferedCodec
+from voiceblender._requests import ChannelInfo, OfferedCodec, ParticipantInfo, SIPRECStream, STTWord
 
 
 class Event(BaseModel):
@@ -78,7 +78,7 @@ class LegDisconnectedEventCdr(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Disconnect reason. Common SIP failures are mapped to named reasons; unmapped 4xx/5xx/6xx codes appear as sip_{code}.
+    # Disconnect reason. Common SIP failures are mapped to named reasons; unmapped 4xx/5xx/6xx codes appear as sip_{code}. This is an open set — treat an unrecognized value as a new reason rather than an error. Known values: api_hangup, room_deleted, remote_bye, caller_cancel, max_duration, session_expired, rtp_timeout, busy, declined, rejected, unavailable, not_found, forbidden, server_error, ring_timeout, unauthorized, timeout, cancelled, not_acceptable, service_unavailable, invite_failed, connect_failed, challenged, transfer_completed, transfer_originate_failed, transfer_connect_failed, bad_answer, siprec_answer_failed, mixer_panic, hangup, peer_slow, connection_reset, ws_error, ws_dial_failed, moq_error, ice_failure, ice_failed, ice_disconnected, livekit_client_initiated, livekit_duplicate_identity, livekit_server_shutdown, livekit_kicked, livekit_room_deleted, livekit_state_mismatch, livekit_join_failure, livekit_migration, livekit_signal_close, livekit_room_closed, livekit_user_unavailable, livekit_user_rejected, livekit_token_expired, livekit_media_failure, livekit_disconnected, livekit_client_closed, livekit_signal_closed, livekit_signal_error, livekit_pc_setup_failed, livekit_add_track_failed, livekit_publisher_failed, livekit_subscriber_failed, livekit_signal_loop_exit, livekit_set_remote_desc_failed, livekit_create_answer_failed, livekit_set_local_desc_failed, livekit_signal_send_failed, livekit_set_publisher_remote_failed, livekit_participant_left.
     reason: str
     # Seconds from leg creation to disconnect
     duration_total: float
@@ -211,6 +211,172 @@ class LegCommandFailedEvent(Event):
     error: str | None = None
 
 
+class LegStreamAddedEvent(Event):
+    """Fired when: an additional m=audio stream was negotiated on a live dialog"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    stream_id: str | None = None
+    mid: str | None = None
+    direction: str | None = None
+    lang: str | None = None
+    room_id: str | None = None
+    role: str | None = None
+    reason: str | None = None
+
+
+class LegStreamRemovedEvent(Event):
+    """Fired when: an audio stream was disabled with a port-0 re-INVITE; its m-line slot survives as a tombstone"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    stream_id: str | None = None
+    mid: str | None = None
+    direction: str | None = None
+    lang: str | None = None
+    room_id: str | None = None
+    role: str | None = None
+    reason: str | None = None
+
+
+class LegStreamRejectedEvent(Event):
+    """Fired when: the peer refused an additional audio stream, or it could not be negotiated; the call is unaffected"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    stream_id: str | None = None
+    mid: str | None = None
+    direction: str | None = None
+    lang: str | None = None
+    room_id: str | None = None
+    role: str | None = None
+    reason: str | None = None
+
+
+class LegStreamFailedEvent(Event):
+    """Fired when: an audio stream's media loop failed and the stream was torn down; the call continues on its remaining streams"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    stream_id: str | None = None
+    mid: str | None = None
+    direction: str | None = None
+    lang: str | None = None
+    room_id: str | None = None
+    role: str | None = None
+    reason: str | None = None
+
+
+class LegStreamRoomChangedEvent(Event):
+    """Fired when: an audio stream was attached to or detached from a room (an empty room_id means detached)"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    stream_id: str | None = None
+    mid: str | None = None
+    direction: str | None = None
+    lang: str | None = None
+    room_id: str | None = None
+    role: str | None = None
+    reason: str | None = None
+
+
+class LegStreamRoleChangedEvent(Event):
+    """Fired when: an audio stream's routing role changed; the room's allow-sets were recomputed atomically"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    stream_id: str | None = None
+    mid: str | None = None
+    direction: str | None = None
+    lang: str | None = None
+    room_id: str | None = None
+    role: str | None = None
+    reason: str | None = None
+
+
+class SIPRECSessionStartedEvent(Event):
+    """Fired when: an inbound SIPREC recording session was accepted; carries the participants and the stream-to-participant bindings"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    session_id: str | None = None
+    data_mode: str | None = None
+    participants: list[ParticipantInfo] | None = None
+    streams: list[SIPRECStream] | None = None
+
+
+class SIPRECSessionEndedEvent(Event):
+    """Fired when: a SIPREC recording session ended"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    session_id: str | None = None
+    reason: str | None = None
+
+
+class SIPRECMetadataUpdatedEvent(Event):
+    """Fired when: a SIPREC recording session's metadata document was updated on a re-INVITE"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    session_id: str | None = None
+    data_mode: str | None = None
+    participants_joined: list[str] | None = None
+    participants_left: list[str] | None = None
+    streams_added: list[str] | None = None
+    streams_removed: list[str] | None = None
+    streams: list[SIPRECStream] | None = None
+
+
+class SIPRECParticipantJoinedEvent(Event):
+    """Fired when: a party joined the call being recorded by a SIPREC session"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    session_id: str | None = None
+    label: str | None = None
+    leg_stream_id: str | None = None
+    participant_id: str | None = None
+    participant_aor: str | None = None
+    participant_name: str | None = None
+
+
+class SIPRECParticipantLeftEvent(Event):
+    """Fired when: a party left the call being recorded by a SIPREC session"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str | None = None
+    app_id: str | None = None
+    session_id: str | None = None
+    label: str | None = None
+    leg_stream_id: str | None = None
+    participant_id: str | None = None
+    participant_aor: str | None = None
+    participant_name: str | None = None
+
+
 class DTMFReceivedEvent(Event):
     """Fired when: dTMF digit received"""
 
@@ -290,6 +456,10 @@ class PlaybackFinishedEvent(Event):
     app_id: str | None = None
     # Playback identifier
     playback_id: str | None = None
+    # Why playback ended: 'completed' (reached the end of the audio) or 'stopped' (did not reach the end, for any reason)
+    reason: str | None = None
+    # Milliseconds of audio actually played, accumulated across repeat iterations
+    played_ms: int | None = None
 
 
 class PlaybackErrorEvent(Event):
@@ -334,6 +504,10 @@ class TTSFinishedEvent(Event):
     app_id: str | None = None
     # TTS playback identifier
     tts_id: str | None = None
+    # Why the utterance ended: 'completed' (reached the end of the audio) or 'stopped' (did not reach the end, for any reason)
+    reason: str | None = None
+    # Milliseconds of audio actually played
+    played_ms: int | None = None
 
 
 class TTSErrorEvent(Event):
@@ -350,6 +524,40 @@ class TTSErrorEvent(Event):
     tts_id: str | None = None
     # Error message
     error: str | None = None
+    # Failure category: permanent_auth, permanent_input, rate_limited, service_unavailable, retryable, canceled or unknown for a synthesis failure, playback for a failure while streaming the audio. New values may be added; treat an unrecognised value as unknown
+    category: str | None = None
+
+
+class TTSStagedEvent(Event):
+    """Fired when: preflight TTS finished synthesizing and is ready to commit"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Leg identifier
+    leg_id: str | None = None
+    room_id: str | None = None
+    app_id: str | None = None
+    # TTS playback identifier, to commit or discard
+    tts_id: str | None = None
+    # Size of the buffered audio
+    bytes: int | None = None
+    # How long the buffered audio will play for. 0 when the duration is not derivable from the audio format
+    duration_ms: int | None = None
+
+
+class TTSDiscardedEvent(Event):
+    """Fired when: staged TTS was dropped without being played"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Leg identifier
+    leg_id: str | None = None
+    room_id: str | None = None
+    app_id: str | None = None
+    # TTS playback identifier
+    tts_id: str | None = None
+    # Why the staged utterance was dropped: 'app' (explicitly discarded), 'expired' (TTS_PREFLIGHT_TTL elapsed) or 'leg_gone' (the leg ended while it was staged)
+    reason: str | None = None
 
 
 class RecordingStartedEvent(Event):
@@ -362,7 +570,7 @@ class RecordingStartedEvent(Event):
     # Room identifier
     room_id: str | None = None
     app_id: str | None = None
-    # Recording file path or S3 URI
+    # Recording file path or S3 URI — does not exist yet; the path only appears when the recording stops
     file: str | None = None
 
 
@@ -380,6 +588,8 @@ class RecordingFinishedEvent(Event):
     file: str | None = None
     multi_channel_file: str | None = None
     channels: dict[str, ChannelInfo] | None = None
+    # Participants whose audio is missing from multi_channel_file because their capture failed. Absent when the recording is complete
+    omitted_legs: list[str] | None = None
 
 
 class RecordingPausedEvent(Event):
@@ -591,6 +801,38 @@ class STTTextEvent(Event):
     text: str | None = None
     # Whether this is a final or partial transcript
     is_final: bool | None = None
+    # Whether the speaker stopped talking, as opposed to is_final's 'this segment will not change again'. Deepgram only; always false for providers that do not report it
+    speech_final: bool | None = None
+
+
+class STTTurnEvent(Event):
+    """Fired when: speech-to-text turn boundary"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Leg identifier
+    leg_id: str | None = None
+    # Room identifier
+    room_id: str | None = None
+    app_id: str | None = None
+    # Turn boundary: start_of_turn, update, eager_end_of_turn, turn_resumed or end_of_turn (Deepgram Flux), or utterance_end (Deepgram, when utterance_end_ms is set). New values may be added
+    event: str | None = None
+    # Index of the turn within the session, incrementing after each end_of_turn
+    turn_index: int | None = None
+    # Transcript of the turn so far. Empty on utterance_end
+    text: str | None = None
+    # How confident the model is that the turn has ended
+    end_of_turn_confidence: float | None = None
+    # Start of the audio window this transcript covers
+    audio_window_start_ms: int | None = None
+    # End of the audio window this transcript covers
+    audio_window_end_ms: int | None = None
+    # When the last word ended (utterance_end only)
+    last_word_end_ms: int | None = None
+    # Per-word transcript with timings and confidence, when the provider supplies it
+    words: list[STTWord] | None = None
+    # Languages detected in the turn
+    languages: list[str] | None = None
 
 
 class AgentConnectedEvent(Event):
@@ -789,6 +1031,17 @@ _EVENT_TYPES: dict[str, type[Event]] = {
     "leg.hold": LegHoldEvent,
     "leg.unhold": LegUnholdEvent,
     "leg.command_failed": LegCommandFailedEvent,
+    "leg.stream_added": LegStreamAddedEvent,
+    "leg.stream_removed": LegStreamRemovedEvent,
+    "leg.stream_rejected": LegStreamRejectedEvent,
+    "leg.stream_failed": LegStreamFailedEvent,
+    "leg.stream_room_changed": LegStreamRoomChangedEvent,
+    "leg.stream_role_changed": LegStreamRoleChangedEvent,
+    "siprec.session_started": SIPRECSessionStartedEvent,
+    "siprec.session_ended": SIPRECSessionEndedEvent,
+    "siprec.metadata_updated": SIPRECMetadataUpdatedEvent,
+    "siprec.participant_joined": SIPRECParticipantJoinedEvent,
+    "siprec.participant_left": SIPRECParticipantLeftEvent,
     "dtmf.received": DTMFReceivedEvent,
     "rtt.received": RTTReceivedEvent,
     "speaking.started": SpeakingStartedEvent,
@@ -799,6 +1052,8 @@ _EVENT_TYPES: dict[str, type[Event]] = {
     "tts.started": TTSStartedEvent,
     "tts.finished": TTSFinishedEvent,
     "tts.error": TTSErrorEvent,
+    "tts.staged": TTSStagedEvent,
+    "tts.discarded": TTSDiscardedEvent,
     "recording.started": RecordingStartedEvent,
     "recording.finished": RecordingFinishedEvent,
     "recording.paused": RecordingPausedEvent,
@@ -816,6 +1071,7 @@ _EVENT_TYPES: dict[str, type[Event]] = {
     "room.routing_changed": RoomRoutingChangedEvent,
     "leg.role_changed": LegRoleChangedEvent,
     "stt.text": STTTextEvent,
+    "stt.turn": STTTurnEvent,
     "agent.connected": AgentConnectedEvent,
     "agent.disconnected": AgentDisconnectedEvent,
     "agent.user_transcript": AgentUserTranscriptEvent,

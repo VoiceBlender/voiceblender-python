@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, JsonValue, PrivateAttr
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 if TYPE_CHECKING:
     from voiceblender._client import Client
@@ -56,6 +56,17 @@ class WebhookEventType(str, Enum):
     LEG_HOLD = "leg.hold"
     LEG_UNHOLD = "leg.unhold"
     LEG_COMMAND_FAILED = "leg.command_failed"
+    LEG_STREAM_ADDED = "leg.stream_added"
+    LEG_STREAM_REMOVED = "leg.stream_removed"
+    LEG_STREAM_REJECTED = "leg.stream_rejected"
+    LEG_STREAM_FAILED = "leg.stream_failed"
+    LEG_STREAM_ROOM_CHANGED = "leg.stream_room_changed"
+    LEG_STREAM_ROLE_CHANGED = "leg.stream_role_changed"
+    SIPREC_SESSION_STARTED = "siprec.session_started"
+    SIPREC_SESSION_ENDED = "siprec.session_ended"
+    SIPREC_METADATA_UPDATED = "siprec.metadata_updated"
+    SIPREC_PARTICIPANT_JOINED = "siprec.participant_joined"
+    SIPREC_PARTICIPANT_LEFT = "siprec.participant_left"
     DTMF_RECEIVED = "dtmf.received"
     RTT_RECEIVED = "rtt.received"
     SPEAKING_STARTED = "speaking.started"
@@ -66,6 +77,8 @@ class WebhookEventType(str, Enum):
     TTS_STARTED = "tts.started"
     TTS_FINISHED = "tts.finished"
     TTS_ERROR = "tts.error"
+    TTS_STAGED = "tts.staged"
+    TTS_DISCARDED = "tts.discarded"
     RECORDING_STARTED = "recording.started"
     RECORDING_FINISHED = "recording.finished"
     RECORDING_PAUSED = "recording.paused"
@@ -83,6 +96,7 @@ class WebhookEventType(str, Enum):
     ROOM_ROUTING_CHANGED = "room.routing_changed"
     LEG_ROLE_CHANGED = "leg.role_changed"
     STT_TEXT = "stt.text"
+    STT_TURN = "stt.turn"
     AGENT_CONNECTED = "agent.connected"
     AGENT_DISCONNECTED = "agent.disconnected"
     AGENT_USER_TRANSCRIPT = "agent.user_transcript"
@@ -95,14 +109,6 @@ class WebhookEventType(str, Enum):
     SIP_OUTBOUND_REGISTRATION_ACTIVE = "sip.outbound_registration_active"
     SIP_OUTBOUND_REGISTRATION_FAILED = "sip.outbound_registration_failed"
     SIP_OUTBOUND_REGISTRATION_EXPIRED = "sip.outbound_registration_expired"
-
-
-# ChannelInfo is referenced in the spec but not fully defined; use JsonValue.
-ChannelInfo = JsonValue
-
-
-# OfferedCodec is referenced in the spec but not fully defined; use JsonValue.
-OfferedCodec = JsonValue
 
 
 class Leg(BaseModel):

@@ -128,6 +128,44 @@ def test_extra_response_classes_exported() -> None:
         assert cls is not None
 
 
+def test_every_component_schema_has_a_class() -> None:
+    """Every ``components.schemas`` entry must reach the package as a class.
+
+    The generator emits all of them (``gen_requests``) except the few another
+    pass owns (``SCHEMAS_EMITTED_ELSEWHERE``). This is the regression guard for
+    the failure mode a whitelist produces: a schema added to the spec is
+    referenced by the generated modules but never declared, which breaks the
+    import of whole modules — and with it every method they bind.
+    """
+    spec = generate.load_yaml(OPENAPI)
+    schemas = (spec.get("components") or {}).get("schemas") or {}
+    assert schemas, "openapi.yaml declares no component schemas"
+    missing = [
+        generate.class_name(name)
+        for name in schemas
+        if name != "WebhookEvent"  # emitted as the Event base class
+        and not hasattr(voiceblender, generate.class_name(name))
+    ]
+    assert not missing, f"schemas with no exported class: {sorted(missing)}"
+
+
+def test_no_class_is_declared_twice() -> None:
+    """A schema in both specs is emitted once and imported, never redeclared."""
+    src = Path(__file__).resolve().parents[1] / "src" / "voiceblender"
+    declared: dict[str, str] = {}
+    duplicates: list[str] = []
+    for path in sorted(src.glob("*.py")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("class "):
+                continue
+            name = line[len("class ") :].split("(")[0].split(":")[0].strip()
+            if name in declared:
+                duplicates.append(f"{name}: {declared[name]} and {path.name}")
+            else:
+                declared[name] = path.name
+    assert not duplicates, f"classes declared in two modules: {duplicates}"
+
+
 def test_playback_helpers_exported() -> None:
     assert callable(voiceblender.play_url)
     assert callable(voiceblender.play_tone)

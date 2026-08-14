@@ -44,66 +44,131 @@ from voiceblender._responses_extra import (
     WebRTCOfferResponse,
 )
 
+
 # _client and the generated modules are imported lazily so the package still
 # imports cleanly between milestones (before generation has run).
+#
+# Every guard below catches ``ModuleNotFoundError`` for the *module being
+# imported* only. A plain ``except ImportError`` would also swallow a generated
+# module that exists but fails to import — e.g. one referencing a type the
+# generator never emitted — leaving every Leg/Room method silently unbound at
+# runtime while ``import voiceblender`` and ``mypy`` both still pass.
+def _module_missing(exc: ModuleNotFoundError, module: str) -> bool:
+    """True if *exc* is just "that module isn't there" (generation hasn't run)."""
+    return exc.name == module
+
+
 try:
     from voiceblender._client import Client
-except ImportError:  # pragma: no cover
+except ModuleNotFoundError as _exc:  # pragma: no cover
+    if not _module_missing(_exc, "voiceblender._client"):
+        raise
     Client = None  # type: ignore[assignment, misc]
 
 # Generated symbols ------------------------------------------------------------
 # Each block is guarded so the package imports even if generation hasn't run.
 try:
     from voiceblender._models import Leg, LegState, LegType, Room, WebhookEventType  # noqa: F401
-except ImportError:  # pragma: no cover
-    pass
+except ModuleNotFoundError as _exc:  # pragma: no cover
+    if not _module_missing(_exc, "voiceblender._models"):
+        raise
 
 try:
     from voiceblender._requests import (  # noqa: F401
         AddLegRequest,
+        AddLegStreamRequest,
+        AddRoomStream,
         AgentMessageRequest,
         AMDParams,
         AnswerLegRequest,
+        AnswerLegStream,
+        AttachStreamRoomRequest,
+        BridgeView,
+        ChallengeRequest,
+        ChannelInfo,
         CreateLegRequest,
+        CreateLegStream,
+        CreateRoomBridgeRequest,
         CreateRoomRequest,
+        CreateTrunkRequest,
+        CreateTrunkResponse,
         DeepgramAgentRequest,
         DeleteLegRequest,
         DTMFRequest,
         EarlyMediaLegRequest,
         ElevenLabsAgentRequest,
         ICECandidateInit,
+        IPIPTrunkSpec,
+        IPIPTrunkView,
+        LegStreamView,
+        LiveKitParams,
+        LiveKitPermissions,
+        OfferedCodec,
+        ParticipantInfo,
         PipecatAgentRequest,
         RecordingRequest,
+        RegistrationAcceptRequest,
+        RegistrationRejectRequest,
+        RegistrationsResponse,
+        RegistrationView,
+        RoomRoutingRequest,
+        RoomRoutingUpdateRequest,
+        RoomRoutingView,
+        RoutingRowUpdate,
         RTTRequest,
+        SetLegRoleRequest,
         SIPAuth,
+        SIPRECParticipantView,
+        SIPRECSessionView,
+        SIPRECStream,
+        SIPRECStreamView,
+        SIPRegisterTrunkSpec,
+        SIPRegisterTrunkView,
+        StartSIPRECRequest,
         STTRequest,
+        STTWord,
+        TransferCompleteRequest,
+        TransferDeclineRequest,
+        TransferProgressRequest,
         TransferRequest,
+        TrunksListResponse,
+        TrunkView,
         TTSRequest,
+        UpdateLegStreamRequest,
+        UpdateRoomBridgeRequest,
         VAPIAgentRequest,
         VolumeRequest,
+        WebRTCCandidatesResult,
         WebRTCOfferRequest,
+        WebRTCOfferResult,
     )
-except ImportError:  # pragma: no cover
-    pass
+except ModuleNotFoundError as _exc:  # pragma: no cover
+    if not _module_missing(_exc, "voiceblender._requests"):
+        raise
 
 try:
     from voiceblender._responses import StatusResponse  # noqa: F401
-except ImportError:  # pragma: no cover
-    pass
+except ModuleNotFoundError as _exc:  # pragma: no cover
+    if not _module_missing(_exc, "voiceblender._responses"):
+        raise
 
 try:
     from voiceblender._events import Event, parse_event  # noqa: F401
-except ImportError:  # pragma: no cover
-    pass
+except ModuleNotFoundError as _exc:  # pragma: no cover
+    if not _module_missing(_exc, "voiceblender._events"):
+        raise
 
 # Side-effect imports: these modules bind methods onto Client / Leg / Room
-# at import time. The ImportError guards keep the package importable during
-# early milestones (before the generator has written the files).
+# at import time. The guard keeps the package importable during early
+# milestones (before the generator has written the files) but re-raises when
+# the module exists and its own imports fail — otherwise every method it binds
+# would vanish silently.
 for _mod in ("_legs", "_rooms", "_webrtc", "_vsi"):
     try:
         __import__(f"voiceblender.{_mod}")
-    except ImportError:  # pragma: no cover
-        pass
+    except ModuleNotFoundError as _exc:  # pragma: no cover
+        if not _module_missing(_exc, f"voiceblender.{_mod}"):
+            raise
 del _mod
 
 # Install *_sync methods onto Leg / Room (subscribe-before-start helpers),
@@ -118,18 +183,28 @@ try:
     _sync_helpers_mod.install(_Leg, _Room)
     _hub_mod.install_subscribe_methods(_Client, _Leg, _Room)
     del _sync_helpers_mod, _hub_mod, _Leg, _Room, _Client
-except ImportError:  # pragma: no cover
-    pass
+except ModuleNotFoundError as _exc:  # pragma: no cover
+    if _exc.name not in (
+        "voiceblender._hub",
+        "voiceblender._sync_helpers",
+        "voiceblender._client",
+        "voiceblender._models",
+    ):
+        raise
 
 # Public Subscription + EventStream exports (M5).
 try:
     from voiceblender._hub import Subscription  # noqa: F401
-except ImportError:  # pragma: no cover
+except ModuleNotFoundError as _exc:  # pragma: no cover
+    if not _module_missing(_exc, "voiceblender._hub"):
+        raise
     Subscription = None  # type: ignore[assignment, misc]
 
 try:
     from voiceblender._stream import EventStream  # noqa: F401
-except ImportError:  # pragma: no cover
+except ModuleNotFoundError as _exc:  # pragma: no cover
+    if not _module_missing(_exc, "voiceblender._stream"):
+        raise
     EventStream = None  # type: ignore[assignment, misc]
 
 
@@ -163,27 +238,71 @@ __all__ = [
     "StatusResponse",
     "WebhookEventType",
     "parse_event",
-    # generated requests
+    # generated requests + the shared views they carry
     "AMDParams",
     "AddLegRequest",
+    "AddLegStreamRequest",
+    "AddRoomStream",
     "AgentMessageRequest",
     "AnswerLegRequest",
+    "AnswerLegStream",
+    "AttachStreamRoomRequest",
+    "BridgeView",
+    "ChallengeRequest",
+    "ChannelInfo",
     "CreateLegRequest",
+    "CreateLegStream",
+    "CreateRoomBridgeRequest",
     "CreateRoomRequest",
+    "CreateTrunkRequest",
+    "CreateTrunkResponse",
     "DTMFRequest",
     "DeepgramAgentRequest",
     "DeleteLegRequest",
     "EarlyMediaLegRequest",
     "ElevenLabsAgentRequest",
     "ICECandidateInit",
+    "IPIPTrunkSpec",
+    "IPIPTrunkView",
+    "LegStreamView",
+    "LiveKitParams",
+    "LiveKitPermissions",
+    "OfferedCodec",
+    "ParticipantInfo",
     "PipecatAgentRequest",
     "RTTRequest",
     "RecordingRequest",
+    "RegistrationAcceptRequest",
+    "RegistrationRejectRequest",
+    "RegistrationView",
+    "RegistrationsResponse",
+    "RoomRoutingRequest",
+    "RoomRoutingUpdateRequest",
+    "RoomRoutingView",
+    "RoutingRowUpdate",
     "SIPAuth",
+    "SIPRECParticipantView",
+    "SIPRECSessionView",
+    "SIPRECStream",
+    "SIPRECStreamView",
+    "SIPRegisterTrunkSpec",
+    "SIPRegisterTrunkView",
     "STTRequest",
+    "STTWord",
+    "SetLegRoleRequest",
+    "StartSIPRECRequest",
     "TTSRequest",
+    "TransferCompleteRequest",
+    "TransferDeclineRequest",
+    "TransferProgressRequest",
     "TransferRequest",
+    "TrunkView",
+    "TrunksListResponse",
+    "UpdateLegStreamRequest",
+    "UpdateRoomBridgeRequest",
     "VAPIAgentRequest",
     "VolumeRequest",
+    "WebRTCCandidatesResult",
     "WebRTCOfferRequest",
+    "WebRTCOfferResult",
 ]
