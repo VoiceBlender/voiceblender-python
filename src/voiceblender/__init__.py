@@ -24,7 +24,22 @@ For a synchronous API surface use ``voiceblender.sync.SyncClient``.
 
 from __future__ import annotations
 
-__version__ = "1.0.0"
+# The version is the git tag the artifact was built from (hatch-vcs writes
+# _version.py at build time; see [tool.hatch.version] in pyproject.toml). In a
+# plain source checkout that file does not exist, so fall back to the installed
+# distribution metadata, and to "0.0.0.dev0" when the package isn't installed
+# at all (e.g. running straight out of src/).
+try:
+    from voiceblender._version import __version__
+except ModuleNotFoundError:  # pragma: no cover
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _dist_version
+
+    try:
+        __version__ = _dist_version("voiceblender")
+    except PackageNotFoundError:  # pragma: no cover
+        __version__ = "0.0.0.dev0"
+    del _dist_version, PackageNotFoundError
 
 # Hand-written core ------------------------------------------------------------
 from voiceblender._errors import (

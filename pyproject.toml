@@ -1,10 +1,18 @@
 [build-system]
-requires = ["hatchling"]
+# Pinned below 1.30: newer hatchlings emit ``Metadata-Version: 2.5``, which
+# PyPI does not accept yet — twine rejects such a wheel before it is uploaded
+# ("'2.5' is not a valid metadata version"). Releases in the 1.27–1.29 range
+# emit 2.4. Lift the pin once twine/PyPI accept 2.5 (verify with
+# ``make package``, which runs ``twine check``).
+requires = ["hatchling<1.30", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
 
 [project]
 name = "voiceblender"
-version = "1.0.0"
+# Version comes from the git tag — see [tool.hatch.version] below. Tag a
+# release as ``vX.Y.Z`` and the built artifact is ``X.Y.Z``; there is no
+# version string to bump in this file.
+dynamic = ["version"]
 description = "Python client for the VoiceBlender API"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -35,11 +43,31 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "ruamel.yaml>=0.18",
+    "build>=1.2",
+    "twine>=5",
 ]
 
 [project.urls]
 Homepage = "https://voiceblender.com"
 Repository = "https://github.com/VoiceBlender/voiceblender-python"
+
+# The distribution version is derived from the git tag (hatch-vcs wraps
+# setuptools_scm): tag ``v0.12.1`` builds ``voiceblender-0.12.1``. A commit
+# that is not itself tagged builds a dev version like ``0.12.2.dev3+g1a2b3c4``,
+# which PyPI rejects — so a release can only be published from a clean tagged
+# checkout, which is the intended guard rail (``make release-check``).
+#
+# Building the wheel from an unpacked sdist works without any git history:
+# hatch-vcs falls back to the version recorded in the sdist's PKG-INFO. That is
+# the path ``python -m build`` takes by default.
+[tool.hatch.version]
+source = "vcs"
+
+# Writes the resolved version into the package as _version.py so
+# ``voiceblender.__version__`` matches the artifact without a second constant
+# to keep in sync. Generated at build time and git-ignored.
+[tool.hatch.build.hooks.vcs]
+version-file = "src/voiceblender/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/voiceblender"]

@@ -12,3 +12,6 @@ build/
 .coverage
 htmlcov/
 .tox/
+
+# Written at build time by hatch-vcs from the git tag.
+src/voiceblender/_version.py
