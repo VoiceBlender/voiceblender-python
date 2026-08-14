@@ -18,6 +18,8 @@ from voiceblender._requests import (
     RecordingRequest,
     RoomRoutingRequest,
     RoomRoutingUpdateRequest,
+    RoomRoutingView,
+    StartSIPRECRequest,
     STTRequest,
     TTSRequest,
     VAPIAgentRequest,
@@ -30,7 +32,6 @@ from voiceblender._responses_extra import (
     RecordingResponse,
     TTSResponse,
 )
-from voiceblender._vsi import RoomRoutingView
 
 __all__: list[str] = []
 
@@ -83,7 +84,7 @@ Room.delete = _room_delete  # type: ignore[method-assign]
 async def _room_add_leg(self: Room, req: AddLegRequest) -> AddLegResponse:
     """Add or move a leg to a room
 
-    Add a leg to a room (auto-creates room if it doesn't exist). If the leg is already in a different room, it is atomically moved to the target room. A ringing inbound SIP leg is automatically answered before being added — in this case the response status is `adding` and the actual room join happens asynchronously, observable via `leg.joined_room`. Auto-answer failures surface as `leg.command_failed` with `command="add_to_room"`.
+    Add a leg to a room (auto-creates room if it doesn't exist). If the leg is already in a different room, it is atomically moved to the target room. A ringing inbound SIP leg is automatically answered before being added — in this case the response status is `adding` and the actual room join happens asynchronously, observable via `leg.joined_room`. Auto-answer failures surface as `leg.command_failed` with `command="add_to_room"`. Only the leg's primary audio stream joins by default; `streams` additionally mixes named secondary streams of the same leg into this room. A stream currently mixed elsewhere is moved here.
     """
     if self._client is None:
         raise RuntimeError(f"{type(self).__name__} not bound to a Client")
@@ -157,6 +158,23 @@ async def _room_update_routing(self: Room, req: RoomRoutingUpdateRequest) -> Roo
 
 
 Room.update_routing = _room_update_routing  # type: ignore[method-assign]
+
+
+async def _room_start_room_siprec(self: Room, req: StartSIPRECRequest) -> Leg:
+    """Fork a room to an external SIPREC recording server
+
+    Originates a SIPREC recording session (RFC 7866) to the given recording server, offering one `sendonly` `m=audio` section per room participant and carrying an RFC 7865 metadata document that names each party and binds it to a section's `a=label`. Each participant's own audio is forked to its own section — not the room mix. Returns the resulting `siprec_out` leg; delete that leg to end the session. Requires `SIPREC_SRC_ENABLED=true`.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("POST", f"/rooms/{self.id}/siprec", body=req, out_model=Leg)
+    if out is not None:
+        out._client = self._client
+    assert out is not None, "startRoomSIPREC" + ": empty response"
+    return out
+
+
+Room.start_room_siprec = _room_start_room_siprec  # type: ignore[method-assign]
 
 
 async def _room_play(self: Room, req: PlaybackRequest) -> PlaybackResponse:

@@ -10,13 +10,89 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
-class SIPAuth(BaseModel):
-    """SIP digest authentication credentials."""
+class AddLegRequest(BaseModel):
+    """AddLegRequest."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    username: str = ""
-    password: str
+    # ID of the leg to add
+    leg_id: str
+    # If set, apply this mute state to the leg atomically before it joins the mixer (no race where un-muted audio enters the mix). Omit to leave current state untouched (useful when moving between rooms).
+    mute: bool | None = None
+    # If set, apply this deaf state to the leg atomically before it joins the mixer. Omit to leave current state untouched.
+    deaf: bool | None = None
+    # If set, control whether this leg receives DTMF digits broadcast from other legs in the same room. Omit to leave current state untouched (default for new legs is true).
+    accept_dtmf: bool | None = None
+    # If set, apply this routing role to the leg atomically before it joins the mixer. The room's routing matrix (see PUT /v1/rooms/{id}/routing) decides which other legs this leg hears and is heard by based on roles. Pass "" to clear the role (full mesh). Omit to leave the current role untouched.
+    role: str | None = None
+    # Additional audio streams of the leg to mix into this room, each with its own routing role. Omit to add only the leg's primary stream. A stream already mixed elsewhere is moved here.
+    streams: list[AddRoomStream] | None = None
+
+
+class AddLegStreamRequest(BaseModel):
+    """AddLegStreamRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Media direction for the new stream, from this server's point of view. Defaults to sendrecv.
+    direction: str | None = None
+    # BCP 47 language tag advertised as a=lang (RFC 8866), e.g. "es-ES" for a Spanish translation feed.
+    lang: str | None = None
+    # Value advertised as a=content (RFC 4796). Use "main" for original audio and "alt" for an alternative feed such as a translation.
+    content: str | None = None
+    # Value advertised as a=label (RFC 4574), for correlating the stream with external metadata.
+    label: str | None = None
+    # If set, attach the new stream to this room once it is negotiated.
+    room_id: str | None = None
+    # Routing role to apply when room_id is set.
+    role: str | None = None
+
+
+class AgentMessageRequest(BaseModel):
+    """AgentMessageRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Context or instruction to inject into the running agent session
+    message: str
+
+
+class AnswerLegRequest(BaseModel):
+    """AnswerLegRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # If true, emit speaking.started and speaking.stopped events for this leg. If false, suppress them. Omit to use the server default (SPEECH_DETECTION_ENABLED env var, default false).
+    speech_detection: bool | None = None
+    # Explicit codec for the answer SDP. Must appear in the remote offer's offered_codecs list. Omit to use the server's default preference order.
+    codec: str | None = None
+    # Rooms for the caller's additional audio streams, applied once the answer is negotiated. Positional: entry i addresses the i-th accepted stream beyond the primary, in m-line order — the caller's offer decides how many exist, so an entry with no matching stream is ignored. Use POST /v1/legs/{id}/streams/{streamId}/room to re-route a stream later.
+    streams: list[AnswerLegStream] | None = None
+
+
+class AttachStreamRoomRequest(BaseModel):
+    """AttachStreamRoomRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Room to mix this stream into. May differ from the leg's own room.
+    room_id: str
+    # Routing role for the stream inside that room. The room's routing matrix decides who hears it.
+    role: str | None = None
+
+
+class ChallengeRequest(BaseModel):
+    """ChallengeRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    realm: str
+    username: str | None = None
+    password: str | None = None
+    ha_1: str | None = Field(default=None, alias="ha1")
+    algorithm: str | None = None
+    qop: list[str] | None = None
+    max_expires: int | None = None
 
 
 class CreateLegRequest(BaseModel):
@@ -30,7 +106,7 @@ class CreateLegRequest(BaseModel):
     to: str | None = None
     # Deprecated alias for `to` (sip legs only). Prefer `to`.
     uri: str | None = None
-    # Caller ID — sets the user part of the SIP From header (e.g. "+15551234567", "alice")
+    # Caller ID. A bare user-part (e.g. "+15551234567", "alice") sets the user of the SIP From header. A full SIP URI (e.g. "sip:alice@pbx.example.com") sets both the user and the host; otherwise the host comes from the matched trunk's AOR realm, falling back to SIP_DOMAIN.
     from_: str | None = Field(default=None, alias="from")
     # SIP Privacy header value (e.g. "id", "none")
     privacy: str | None = None
@@ -60,6 +136,8 @@ class CreateLegRequest(BaseModel):
     speech_detection: bool | None = None
     # For sip legs: offer Real-Time Text (ITU-T T.140 over RTP per RFC 4103) alongside audio. For websocket legs: enable the bidirectional text-message channel. Default: false.
     rtt: bool | None = None
+    # SIP outbound only. Extra m=audio sections to offer alongside the call's primary bidirectional audio, so a multi-stream call is established by the first INVITE instead of a follow-up re-INVITE. Each entry binds its own RTP port and may be mixed into its own room. To add a stream to a call that is already up, use POST /v1/legs/{id}/streams instead.
+    streams: list[CreateLegStream] | None = None
     # WebSocket target URL (ws:// or wss://) for outbound websocket legs. Required when type=websocket.
     url: str | None = None
     # PCM sample rate for websocket legs. The room's mixer automatically resamples between this and the room rate.
@@ -72,86 +150,49 @@ class CreateLegRequest(BaseModel):
     livekit: Any = None
 
 
-class AnswerLegRequest(BaseModel):
-    """AnswerLegRequest."""
+class CreateRoomBridgeRequest(BaseModel):
+    """CreateRoomBridgeRequest."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # If true, emit speaking.started and speaking.stopped events for this leg. If false, suppress them. Omit to use the server default (SPEECH_DETECTION_ENABLED env var, default false).
-    speech_detection: bool | None = None
-    # Explicit codec for the answer SDP. Must appear in the remote offer's offered_codecs list. Omit to use the server's default preference order.
-    codec: str | None = None
+    # Custom bridge ID (auto-generated UUID if omitted)
+    id: str | None = None
+    # The other room to join. Must use the same sample rate as the room in the path.
+    room_id: str
+    # Audio flow relative to the room in the path: bidirectional (both hear each other), send (path room → other only), receive (other → path room only), none (allocated but silent). Default: bidirectional.
+    direction: str | None = None
 
 
-class EarlyMediaLegRequest(BaseModel):
-    """EarlyMediaLegRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    # Explicit codec for the 183 Session Progress SDP. Must appear in the remote offer's offered_codecs list. Omit to use the server's default preference order.
-    codec: str | None = None
-
-
-class ChallengeRequest(BaseModel):
-    """ChallengeRequest."""
+class CreateRoomRequest(BaseModel):
+    """CreateRoomRequest."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    realm: str
-    username: str | None = None
-    password: str | None = None
-    ha_1: str | None = Field(default=None, alias="ha1")
-    algorithm: str | None = None
-    qop: list[str] | None = None
-    max_expires: int | None = None
+    # Custom room ID (auto-generated UUID if omitted)
+    id: str
+    # Route all events for this room exclusively to this URL instead of global webhooks.
+    webhook_url: str | None = None
+    # HMAC-SHA256 signing secret for the per-room webhook.
+    webhook_secret: str | None = None
+    # Application identifier. Carried through to all events for this room. Use to filter the WebSocket event stream by app.
+    app_id: str | None = None
+    # Mixer sample rate in Hz. Allowed values: 8000, 16000, 48000. Default: 16000.
+    sample_rate: int | None = None
 
 
-class DeleteLegRequest(BaseModel):
-    """DeleteLegRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    # Disconnect reason. Only honored for unanswered SIP inbound legs (state `ringing` or `early_media`); on connected legs the body is ignored and the leg is hung up with the legacy `api_hangup` reason. The value flows through to `leg.disconnected`'s `cdr.reason` and selects the SIP final response: `busy`→486, `declined`/`rejected`→603, `unavailable`→480, `not_found`→404, `forbidden`→403, `server_error`→500.
-    reason: str | None = None
-
-
-class TransferRequest(BaseModel):
-    """TransferRequest."""
+class CreateTrunkRequest(BaseModel):
+    """CreateTrunkRequest."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # SIP URI to transfer the call to (e.g. "sip:bob@example.com").
-    target: str
-    # ID of an existing connected SIP leg whose dialog should be replaced (attended transfer). Omit for blind transfer.
-    replaces_leg_id: str | None = None
-
-
-class TransferProgressRequest(BaseModel):
-    """TransferProgressRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    status_code: int
-    reason: str | None = None
-
-
-class TransferCompleteRequest(BaseModel):
-    """TransferCompleteRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    success: bool
-    status_code: int | None = None
-    reason: str | None = None
-
-
-class TransferDeclineRequest(BaseModel):
-    """TransferDeclineRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    code: int | None = None
-    reason: str | None = None
+    # Trunk type discriminator. Only `sip_register` is implemented today; `ip_ip` is reserved and returns 501.
+    type: str
+    # Application identifier carried through to every event emitted by this trunk.
+    app_id: str | None = None
+    # Required when type == "sip_register". Configures the outbound REGISTER (registrar URI, AOR, digest credentials, expiry).
+    sip_register: Any = None
+    # Reserved for static-IP peering (no REGISTER). Not yet implemented; supplying this returns 501.
+    ip_ip: Any = None
 
 
 class DTMFRequest(BaseModel):
@@ -161,62 +202,6 @@ class DTMFRequest(BaseModel):
 
     # DTMF digits to send (0-9, *, #)
     digits: str
-
-
-class RTTRequest(BaseModel):
-    """RTTRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    # UTF-8 text to send. May be one or more characters and may include T.140 control codes (e.g. backspace U+0008, CR/LF).
-    text: str
-
-
-class VolumeRequest(BaseModel):
-    """VolumeRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    # Volume adjustment (-8 to 8, ~3dB per step, 0 = unchanged)
-    volume: int
-
-
-class TTSRequest(BaseModel):
-    """TTSRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    # Text to synthesize
-    text: str
-    # Provider-specific voice identifier. ElevenLabs: voice name or ID. AWS Polly: voice ID (e.g. Joanna, Matthew). Google Cloud: voice name — either full format (e.g. en-US-Neural2-F) or short name for Gemini models (e.g. Achernar, Kore). Deepgram: model name (e.g. aura-2-asteria-en).
-    voice: str
-    # Provider-specific model/engine. ElevenLabs: model ID. AWS Polly: engine (standard, neural, long-form, generative; default neural). Google Cloud: model name (e.g. gemini-2.5-pro-tts, chirp3-hd).
-    model_id: str
-    # Language code (e.g. "en-US", "pl-pl"). Required for Google Gemini TTS voices that use short names (e.g. Achernar). Auto-extracted from full voice names like en-US-Neural2-F.
-    language: str | None = None
-    # Style/tone instruction for promptable voice models (Google Gemini TTS only). E.g. "Read aloud in a warm, welcoming tone."
-    prompt: str | None = None
-    # Volume adjustment in dB (-8 to 8)
-    volume: int
-    # TTS provider: "elevenlabs" (default), "aws", "google", or "deepgram"
-    provider: str | None = None
-    # ElevenLabs: API key override (falls back to ELEVENLABS_API_KEY env var). AWS: optional ACCESS_KEY:SECRET_KEY override (falls back to default AWS credential chain). Google Cloud: optional API key override (falls back to Application Default Credentials). Deepgram: API key override (falls back to DEEPGRAM_API_KEY env var).
-    api_key: str | None = None
-
-
-class STTRequest(BaseModel):
-    """STTRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    # Language code (e.g. "en", "es")
-    language: str
-    # Emit partial (non-final) transcripts
-    partial: bool
-    # STT provider: "elevenlabs" (default) or "deepgram"
-    provider: str | None = None
-    # API key override (falls back to ELEVENLABS_API_KEY or DEEPGRAM_API_KEY env var depending on provider)
-    api_key: str | None = None
 
 
 class DeepgramAgentRequest(BaseModel):
@@ -232,6 +217,24 @@ class DeepgramAgentRequest(BaseModel):
     language: str | None = None
     # API key override (falls back to DEEPGRAM_API_KEY env var)
     api_key: str | None = None
+
+
+class DeleteLegRequest(BaseModel):
+    """DeleteLegRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Disconnect reason. Only honored for unanswered SIP inbound legs (state `ringing` or `early_media`); on connected legs the body is ignored and the leg is hung up with the legacy `api_hangup` reason. The value flows through to `leg.disconnected`'s `cdr.reason` and selects the SIP final response: `busy`→486, `declined`/`rejected`→603, `unavailable`→480, `not_found`→404, `forbidden`→403, `server_error`→500.
+    reason: str | None = None
+
+
+class EarlyMediaLegRequest(BaseModel):
+    """EarlyMediaLegRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Explicit codec for the 183 Session Progress SDP. Must appear in the remote offer's offered_codecs list. Omit to use the server's default preference order.
+    codec: str | None = None
 
 
 class ElevenLabsAgentRequest(BaseModel):
@@ -260,47 +263,13 @@ class PipecatAgentRequest(BaseModel):
     websocket_url: str
 
 
-class VAPIAgentRequest(BaseModel):
-    """VAPIAgentRequest."""
+class RTTRequest(BaseModel):
+    """RTTRequest."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # VAPI assistant ID
-    assistant_id: str
-    # Override the agent's first message
-    first_message: str | None = None
-    # Key-value pairs passed as VAPI variable values (assistantOverrides.variableValues)
-    variable_values: dict[str, str] | None = None
-    # API key override (falls back to VAPI_API_KEY env var)
-    api_key: str | None = None
-
-
-class AgentMessageRequest(BaseModel):
-    """AgentMessageRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    # Context or instruction to inject into the running agent session
-    message: str
-
-
-class AMDParams(BaseModel):
-    """AMDParams."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    # Max milliseconds of silence before declaring no_speech
-    initial_silence_timeout: int | None = None
-    # Speech duration threshold (ms) above which answerer is classified as machine
-    greeting_duration: int | None = None
-    # Silence duration (ms) after initial speech to declare human
-    after_greeting_silence: int | None = None
-    # Max analysis window in milliseconds
-    total_analysis_time: int | None = None
-    # Minimum speech burst duration (ms) to count as a word
-    minimum_word_length: int | None = None
-    # Max time (ms) to wait for the voicemail beep after machine detection. 0 or omitted = disabled.
-    beep_timeout: int | None = None
+    # UTF-8 text to send. May be one or more characters and may include T.140 control codes (e.g. backspace U+0008, CR/LF).
+    text: str
 
 
 class RecordingRequest(BaseModel):
@@ -308,7 +277,7 @@ class RecordingRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # "file" (default) — local disk, "s3" — upload to S3 after recording stops
+    # "file" (default) — local disk, "s3" — upload to S3 after recording stops, "gcs" — upload to Google Cloud Storage via the native GCS API (Application Default Credentials / Workload Identity)
     storage: str
     # When true, record each participant to a separate mono WAV file in addition to the full mix. Only applies to room recordings.
     multi_channel: bool
@@ -324,49 +293,78 @@ class RecordingRequest(BaseModel):
     s_3_access_key: str = Field(alias="s3_access_key")
     # AWS secret access key. Must be set together with s3_access_key.
     s_3_secret_key: str = Field(alias="s3_secret_key")
+    # GCS bucket name. Overrides GCS_BUCKET env var. Required if env var is not set when storage=gcs.
+    gcs_bucket: str
+    # Object name prefix (e.g. recordings or recordings/). Overrides GCS_OBJECT_NAME_PREFIX env var. A trailing slash is added automatically when missing.
+    gcs_object_name_prefix: str
+    # Optional output basename for the WAV file. A .wav suffix is added when missing. Must be a single path segment (no directories). Dots inside the name are preserved (only a trailing .wav is treated as the extension). Rejected with 409 if the file already exists or another recording is using the same name. When omitted, a timestamped name is generated.
+    filename: str
 
 
-class WebRTCOfferRequest(BaseModel):
-    """WebRTCOfferRequest."""
-
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-    # SDP offer from the browser
-    sdp: str
-
-
-class CreateRoomRequest(BaseModel):
-    """CreateRoomRequest."""
+class RegistrationAcceptRequest(BaseModel):
+    """RegistrationAcceptRequest."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Custom room ID (auto-generated UUID if omitted)
-    id: str
-    # Route all events for this room exclusively to this URL instead of global webhooks.
-    webhook_url: str | None = None
-    # HMAC-SHA256 signing secret for the per-room webhook.
-    webhook_secret: str | None = None
-    # Application identifier. Carried through to all events for this room. Use to filter the WebSocket event stream by app.
-    app_id: str | None = None
-    # Mixer sample rate in Hz. Allowed values: 8000, 16000, 48000. Default: 16000.
-    sample_rate: int | None = None
+    max_expires: int | None = None
 
 
-class AddLegRequest(BaseModel):
-    """AddLegRequest."""
+class RegistrationRejectRequest(BaseModel):
+    """RegistrationRejectRequest."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # ID of the leg to add
-    leg_id: str
-    # If set, apply this mute state to the leg atomically before it joins the mixer (no race where un-muted audio enters the mix). Omit to leave current state untouched (useful when moving between rooms).
-    mute: bool | None = None
-    # If set, apply this deaf state to the leg atomically before it joins the mixer. Omit to leave current state untouched.
-    deaf: bool | None = None
-    # If set, control whether this leg receives DTMF digits broadcast from other legs in the same room. Omit to leave current state untouched (default for new legs is true).
-    accept_dtmf: bool | None = None
-    # If set, apply this routing role to the leg atomically before it joins the mixer. The room's routing matrix (see PUT /v1/rooms/{id}/routing) decides which other legs this leg hears and is heard by based on roles. Pass "" to clear the role (full mesh). Omit to leave the current role untouched.
-    role: str | None = None
+    code: int | None = None
+    reason: str | None = None
+
+
+class RoomRoutingRequest(BaseModel):
+    """RoomRoutingRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Listener-role → list of allowed source roles. Omitted listener roles default to full mesh. Empty list = hears nothing.
+    matrix: dict[str, list[str]]
+
+
+class RoomRoutingUpdateRequest(BaseModel):
+    """RoomRoutingUpdateRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Per-listener-role row replacements applied as a single atomic update.
+    updates: list[RoutingRowUpdate]
+
+
+class STTRequest(BaseModel):
+    """STTRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Language code (e.g. "en", "es")
+    language: str
+    # Emit partial (non-final) transcripts
+    partial: bool
+    # STT provider: "elevenlabs" (default), "deepgram" (/v1/listen), "deepgram_flux" (/v2/listen, conversational turn detection) or "azure"
+    provider: str | None = None
+    # API key override (falls back to ELEVENLABS_API_KEY, DEEPGRAM_API_KEY or AZURE_SPEECH_KEY env var depending on provider)
+    api_key: str | None = None
+    # Provider-specific model. Deepgram: default "nova-3". Deepgram Flux: "flux-general-en" (default) or "flux-general-multi".
+    model: str | None = None
+    # Terms to boost recognition of (Deepgram and Deepgram Flux).
+    keyterms: list[str] | None = None
+    # Deepgram only: milliseconds of silence before a segment is finalized. 0 disables endpointing.
+    endpointing: int | None = None
+    # Deepgram only: milliseconds of silence after which an stt.turn event with event=utterance_end is emitted. Deepgram requires interim results for this, which are requested automatically and still suppressed unless partial is true.
+    utterance_end_ms: int | None = None
+    # Deepgram Flux only: end-of-turn confidence that fires an eager_end_of_turn stt.turn event, enabling speculative generation. Must be between 0.3 and 0.9. When unset, no eager_end_of_turn or turn_resumed events are emitted at all.
+    eager_eot_threshold: float | None = None
+    # Deepgram Flux only: end-of-turn confidence required to close a turn. Deepgram default 0.7.
+    eot_threshold: float | None = None
+    # Deepgram Flux only: milliseconds of silence after which a turn is closed regardless of confidence. Deepgram default 5000.
+    eot_timeout_ms: int | None = None
+    # Deepgram Flux only: candidate language codes for the "flux-general-multi" model.
+    language_hints: list[str] | None = None
 
 
 class SetLegRoleRequest(BaseModel):
@@ -378,12 +376,384 @@ class SetLegRoleRequest(BaseModel):
     role: str
 
 
-class RoomRoutingRequest(BaseModel):
-    """RoomRoutingRequest."""
+class StartSIPRECRequest(BaseModel):
+    """StartSIPRECRequest."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Listener-role → list of allowed source roles. Omitted listener roles default to full mesh. Empty list = hears nothing.
+    # SIP URI of the session recording server, e.g. "sip:srs@recorder.example.com:5060". A recording session carries the metadata document alongside the SDP and exceeds the UDP message limit, so the target should accept TCP.
+    srs_uri: str
+    # Which participants to record. Each entry is either a leg ID (that leg's own audio) or "<legID>#<streamID>" for one of a leg's secondary audio streams mixed into the room. Empty or absent records every participant. An entry that is not in the room is a 404.
+    leg_ids: list[str] | None = None
+    # Communication session identifier put in the recording metadata. Defaults to the room ID.
+    session_id: str | None = None
+    # Application identifier tagged onto the resulting leg and its events.
+    app_id: str | None = None
+    # SIP digest username, when the recording server challenges the INVITE.
+    auth_username: str | None = None
+    # SIP digest password, when the recording server challenges the INVITE.
+    auth_password: str | None = None
+    # Extra SIP headers to include in the INVITE. Require: siprec is always sent.
+    headers: dict[str, str] | None = None
+
+
+class TTSRequest(BaseModel):
+    """TTSRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Text to synthesize
+    text: str
+    # Provider-specific voice identifier. ElevenLabs: voice name or ID. AWS Polly: voice ID (e.g. Joanna, Matthew). Google Cloud: voice name — either full format (e.g. en-US-Neural2-F) or short name for Gemini models (e.g. Achernar, Kore). Deepgram: model name (e.g. aura-2-asteria-en).
+    voice: str
+    # Provider-specific model/engine. ElevenLabs: model ID. AWS Polly: engine (standard, neural, long-form, generative; default neural). Google Cloud: model name (e.g. gemini-2.5-pro-tts, chirp3-hd).
+    model_id: str
+    # Language code (e.g. "en-US", "pl-pl"). Required for Google Gemini TTS voices that use short names (e.g. Achernar). Auto-extracted from full voice names like en-US-Neural2-F.
+    language: str | None = None
+    # Style/tone instruction for promptable voice models (Google Gemini TTS only). E.g. "Read aloud in a warm, welcoming tone."
+    prompt: str | None = None
+    # Volume adjustment in dB (-8 to 8)
+    volume: int
+    # TTS provider: "elevenlabs" (default), "aws", "google", or "deepgram"
+    provider: str | None = None
+    # ElevenLabs: API key override (falls back to ELEVENLABS_API_KEY env var). AWS: optional ACCESS_KEY:SECRET_KEY override (falls back to default AWS credential chain). Google Cloud: optional API key override (falls back to Application Default Credentials). Deepgram: API key override (falls back to DEEPGRAM_API_KEY env var).
+    api_key: str | None = None
+
+
+class TransferCompleteRequest(BaseModel):
+    """TransferCompleteRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    success: bool
+    status_code: int | None = None
+    reason: str | None = None
+
+
+class TransferDeclineRequest(BaseModel):
+    """TransferDeclineRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    code: int | None = None
+    reason: str | None = None
+
+
+class TransferProgressRequest(BaseModel):
+    """TransferProgressRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    status_code: int
+    reason: str | None = None
+
+
+class TransferRequest(BaseModel):
+    """TransferRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # SIP URI to transfer the call to (e.g. "sip:bob@example.com").
+    target: str
+    # ID of an existing connected SIP leg whose dialog should be replaced (attended transfer). Omit for blind transfer.
+    replaces_leg_id: str | None = None
+
+
+class UpdateLegStreamRequest(BaseModel):
+    """UpdateLegStreamRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # New routing role for this stream inside its room. The room's routing matrix decides who hears it. Pass an empty string to clear the role (full mesh). Omit to leave it untouched. Applied atomically — the room's allow-sets are recomputed in a single mixer-mutex acquisition, so no audio bleeds through mid-change.
+    role: str | None = None
+
+
+class UpdateRoomBridgeRequest(BaseModel):
+    """UpdateRoomBridgeRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # New audio flow relative to the room in the path: bidirectional, send, receive, or none.
+    direction: str
+
+
+class VAPIAgentRequest(BaseModel):
+    """VAPIAgentRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # VAPI assistant ID
+    assistant_id: str
+    # Override the agent's first message
+    first_message: str | None = None
+    # Key-value pairs passed as VAPI variable values (assistantOverrides.variableValues)
+    variable_values: dict[str, str] | None = None
+    # API key override (falls back to VAPI_API_KEY env var)
+    api_key: str | None = None
+
+
+class VolumeRequest(BaseModel):
+    """VolumeRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Volume adjustment (-8 to 8, ~3dB per step, 0 = unchanged)
+    volume: int
+
+
+class WebRTCOfferRequest(BaseModel):
+    """WebRTCOfferRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # SDP offer from the browser
+    sdp: str
+    # Application identifier. Carried through to all events emitted for this leg, and matched against the VSI `app_id` filter.
+    app_id: str | None = None
+
+
+class AMDParams(BaseModel):
+    """AMDParams."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Max milliseconds of silence before declaring no_speech
+    initial_silence_timeout: int | None = None
+    # Speech duration threshold (ms) above which answerer is classified as machine
+    greeting_duration: int | None = None
+    # Silence duration (ms) after initial speech to declare human
+    after_greeting_silence: int | None = None
+    # Max analysis window in milliseconds. A threshold longer than this window suppresses that verdict; a window shorter than all of initial_silence_timeout, greeting_duration and after_greeting_silence is rejected, since the call could only end not_sure.
+    total_analysis_time: int | None = None
+    # Minimum speech burst duration (ms) to count as a word
+    minimum_word_length: int | None = None
+    # Max time (ms) to wait for the voicemail beep after machine detection. 0 or omitted = disabled.
+    beep_timeout: int | None = None
+
+
+class AddRoomStream(BaseModel):
+    """AddRoomStream."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Stream identifier from GET /v1/legs/{id}/streams. The primary stream is not addressable here — it joins with the leg itself.
+    stream_id: str
+    # Routing role for this stream inside the room.
+    role: str | None = None
+
+
+class AnswerLegStream(BaseModel):
+    """AnswerLegStream."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Room to mix this stream into once the answer is negotiated. May differ from the room the leg itself joins.
+    room_id: str | None = None
+    # Routing role for this stream inside its room.
+    role: str | None = None
+
+
+class BridgeView(BaseModel):
+    """BridgeView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Bridge identifier
+    id: str
+    # The peer room joined to the room in the path
+    room_id: str
+    # Audio flow relative to the room in the path: bidirectional, send, receive, or none.
+    direction: str
+    # Shared mixer sample rate in Hz (both rooms must match).
+    sample_rate: int
+
+
+class ChannelInfo(BaseModel):
+    """ChannelInfo."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    channel: int
+    start_ms: int
+    end_ms: int
+
+
+class CreateLegStream(BaseModel):
+    """CreateLegStream."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Media direction for this stream, from this server's point of view. Defaults to sendrecv.
+    direction: str | None = None
+    # BCP 47 language tag advertised as a=lang (RFC 8866), e.g. "es-ES" for a Spanish translation feed.
+    lang: str | None = None
+    # Value advertised as a=content (RFC 4796). Use "alt" for an alternative feed such as a translation.
+    content: str | None = None
+    # Value advertised as a=label (RFC 4574), for correlating the stream with external metadata.
+    label: str | None = None
+    # Room to mix this stream into once the call connects. May differ from the leg's own room_id, which governs the primary stream.
+    room_id: str | None = None
+    # Routing role for this stream inside its room.
+    role: str | None = None
+
+
+class CreateTrunkResponse(BaseModel):
+    """CreateTrunkResponse."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    type: str
+    status: str
+
+
+class IPIPTrunkSpec(BaseModel):
+    """IPIPTrunkSpec."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Static peer SIP URI for IP-IP peering. Reserved; not yet implemented.
+    peer_uri: str | None = None
+
+
+class IPIPTrunkView(BaseModel):
+    """IPIPTrunkView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    peer_uri: str | None = None
+
+
+class LegStreamView(BaseModel):
+    """LegStreamView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Stream identifier, stable for the life of the dialog. The primary stream is always "0".
+    id: str
+    # The stream's SDP a=mid token (RFC 5888), used to correlate it across offer/answer.
+    mid: str | None = None
+    # Position of the stream's m= line in the SDP. Fixed for the life of the dialog (RFC 3264 §8).
+    index: int
+    # True for the call's main bidirectional audio stream, which cannot be removed or attached to a room independently.
+    primary: bool
+    # Negotiation state.
+    state: str
+    # Negotiated media direction from this server's point of view.
+    direction: str
+    # Direction requested by the application. Survives hold/unhold, unlike the negotiated direction.
+    desired_direction: str | None = None
+    # Codec negotiated for this stream. Streams on one leg may use different codecs.
+    codec: str | None = None
+    # Native sample rate of the stream's codec, in Hz.
+    sample_rate: int | None = None
+    # Local RTP port. Each stream binds its own port; a shared transport is undefined without BUNDLE (RFC 9143).
+    local_port: int | None = None
+    # Remote RTP address media is currently sent to.
+    remote_addr: str | None = None
+    # The stream's a=label value (RFC 4574), for correlating it with external metadata.
+    label: str | None = None
+    # The stream's a=content value (RFC 4796), e.g. "main" for original audio and "alt" for a translated feed.
+    content: str | None = None
+    # The stream's a=lang value (RFC 8866): a BCP 47 language tag such as "en" or "es-ES".
+    lang: str | None = None
+    # Room this stream's audio is mixed into. A secondary stream may sit in a different room than its leg.
+    room_id: str | None = None
+    # Routing role of this stream within its room. Streams carry their own role, independent of their leg's.
+    role: str | None = None
+
+
+class LiveKitParams(BaseModel):
+    """LiveKitParams."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # LiveKit server endpoint (wss://...). Overrides LIVEKIT_URL.
+    url: str | None = None
+    # Pre-signed LiveKit JWT. Mutually exclusive with `room`/`identity` (mint mode); if both are present the token wins.
+    token: str | None = None
+    # LiveKit room name. Required when minting (i.e. `token` is empty AND LIVEKIT_TOKEN_SIGNING_ENABLED=true).
+    room: str | None = None
+    # LiveKit participant identity. Required when minting.
+    identity: str | None = None
+    # Display name for the participant; surfaces in LK Room UIs.
+    participant_name: str | None = None
+    # LiveKit grant flags. Nil pointers default to publish=true, subscribe=true, data=false, admin=false.
+    permissions: Any = None
+    # Go duration string (e.g. "30m", "6h"). Used only when minting. Defaults to LIVEKIT_DEFAULT_TOKEN_TTL (6h).
+    token_ttl: str | None = None
+    # Override LIVEKIT_OPUS_BITRATE for this leg. 6000..510000.
+    opus_bitrate: int | None = None
+
+
+class LiveKitPermissions(BaseModel):
+    """LiveKitPermissions."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Allow publishing tracks. Default true.
+    can_publish: bool | None = None
+    # Allow subscribing to remote tracks. Default true.
+    can_subscribe: bool | None = None
+    # Allow publishing data channel messages. Default false (audio bridge does not use data).
+    can_publish_data: bool | None = None
+    # Grant admin actions on the room (e.g., server-side MuteTrack of remote participants). Default false.
+    room_admin: bool | None = None
+
+
+class OfferedCodec(BaseModel):
+    """OfferedCodec."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    name: str
+    payload_type: int
+    clock_rate: int
+    priority: int
+
+
+class ParticipantInfo(BaseModel):
+    """ParticipantInfo."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    aor: str | None = None
+    name: str | None = None
+
+
+class RegistrationView(BaseModel):
+    """RegistrationView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    aor: str
+    contact: str
+    socket: str
+    transport: str
+    user_agent: str | None = None
+    call_id: str | None = None
+    app_id: str | None = None
+    created_at: str
+    last_refresh: str
+    expires_at: str
+    granted_expires_seconds: int
+
+
+class RegistrationsResponse(BaseModel):
+    """RegistrationsResponse."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    bindings: list[RegistrationView]
+
+
+class RoomRoutingView(BaseModel):
+    """RoomRoutingView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Listener-role → list of allowed source roles. Roles absent from the matrix default to full mesh.
     matrix: dict[str, list[str]]
 
 
@@ -398,13 +768,177 @@ class RoutingRowUpdate(BaseModel):
     sources: list[str]
 
 
-class RoomRoutingUpdateRequest(BaseModel):
-    """RoomRoutingUpdateRequest."""
+class SIPAuth(BaseModel):
+    """SIPAuth."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Per-listener-role row replacements applied as a single atomic update.
-    updates: list[RoutingRowUpdate]
+    # Digest auth username. Optional for whatsapp legs (defaults to `from` with '+' stripped, per Meta's spec).
+    username: str | None = None
+    # Digest auth password.
+    password: str
+
+
+class SIPRECParticipantView(BaseModel):
+    """SIPRECParticipantView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # The participant_id attribute from the recording metadata document.
+    participant_id: str
+    # The participant's address of record, e.g. "sip:alice@example.com".
+    aor: str | None = None
+    # The participant's display name, when the metadata carries one.
+    name: str | None = None
+
+
+class SIPRECSessionView(BaseModel):
+    """SIPRECSessionView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Leg carrying the recording session.
+    leg_id: str
+    # Communication session being recorded, from the metadata's sessionrecordingassoc.
+    session_id: str | None = None
+    # Data mode of the most recently applied metadata document (RFC 7865 §6.1).
+    data_mode: str | None = None
+    # Room this session's streams were attached to, when SIPREC_ROOM_MODE placed them in one.
+    room_id: str | None = None
+    # Every party currently recorded by this session.
+    participants: list[SIPRECParticipantView]
+    # Every negotiated media stream, joined to the participant it carries.
+    streams: list[SIPRECStreamView]
+    # The raw rs-metadata XML document as most recently received.
+    metadata: str | None = None
+
+
+class SIPRECStream(BaseModel):
+    """SIPRECStream."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    label: str | None = None
+    leg_stream_id: str | None = None
+    participant_id: str | None = None
+    participant_aor: str | None = None
+    participant_name: str | None = None
+
+
+class SIPRECStreamView(BaseModel):
+    """SIPRECStreamView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Identifier of the leg stream carrying this recorded media, as used by /v1/legs/{id}/streams.
+    leg_stream_id: str
+    # The stream's SDP a=mid token (RFC 5888).
+    mid: str | None = None
+    # The stream's a=label value (RFC 4574). This is the key that binds the m= section to the recording metadata.
+    label: str | None = None
+    # Negotiated media direction. Always recvonly or inactive: a recording server never transmits.
+    direction: str | None = None
+    # Codec negotiated for this stream.
+    codec: str | None = None
+    # Room this stream's audio is mixed into, when it has been attached to one.
+    room_id: str | None = None
+    # Routing role of this stream within its room. Defaults to the participant's identity.
+    role: str | None = None
+    # Participant whose audio arrives on this stream, from the metadata's participantstreamassoc send binding.
+    participant_id: str | None = None
+    # Address of record of the participant sending on this stream.
+    participant_aor: str | None = None
+    # Display name of the participant sending on this stream.
+    participant_name: str | None = None
+
+
+class SIPRegisterTrunkSpec(BaseModel):
+    """SIPRegisterTrunkSpec."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Upstream registrar SIP URI (e.g. "sip:pbx.example.com:5060" or "sips:pbx.example.com:5061;transport=tls").
+    registrar_uri: str
+    # Address-of-record this trunk REGISTERs (e.g. "sip:alice@pbx.example.com"). Becomes the From URI on outbound REGISTER, and the From / P-Asserted-Identity host on outbound INVITEs placed `from` this AOR.
+    aor: str
+    # Digest auth username. Defaults to the AOR user-part when empty.
+    username: str | None = None
+    # Digest auth password. Required. Never returned in any response.
+    password: str
+    # Override the user-part of the Contact header sent in REGISTER. Defaults to the AOR user-part.
+    contact_user: str | None = None
+    # Requested registration lifetime in seconds. Clamped to [SIP_OUTBOUND_REGISTRATION_MIN_EXPIRES_SECONDS, SIP_OUTBOUND_REGISTRATION_MAX_EXPIRES_SECONDS]. Default: SIP_OUTBOUND_REGISTRATION_DEFAULT_EXPIRES_SECONDS (3600).
+    expires_seconds: int | None = None
+
+
+class SIPRegisterTrunkView(BaseModel):
+    """SIPRegisterTrunkView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    registrar_uri: str
+    aor: str
+    username: str | None = None
+    contact_uri: str | None = None
+    requested_expires_seconds: int
+    granted_expires_seconds: int | None = None
+    last_registered_at: str | None = None
+    next_refresh_at: str | None = None
+    call_id: str | None = None
+    cseq: int | None = None
+    source_address: str | None = None
+
+
+class STTWord(BaseModel):
+    """STTWord."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    word: str
+    confidence: float
+    start_ms: int
+    end_ms: int
+
+
+class TrunkView(BaseModel):
+    """TrunkView."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    type: str
+    app_id: str | None = None
+    status: str
+    last_error: str | None = None
+    created_at: str
+    sip_register: Any = None
+    ip_ip: Any = None
+
+
+class TrunksListResponse(BaseModel):
+    """TrunksListResponse."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    trunks: list[TrunkView]
+
+
+class WebRTCCandidatesResult(BaseModel):
+    """WebRTCCandidatesResult."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    candidates: list[ICECandidateInit]
+    done: bool
+
+
+class WebRTCOfferResult(BaseModel):
+    """WebRTCOfferResult."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    leg_id: str
+    sdp: str
 
 
 class ICECandidateInit(BaseModel):
