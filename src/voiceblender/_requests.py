@@ -68,6 +68,8 @@ class AnswerLegRequest(BaseModel):
     codec: str | None = None
     # Rooms for the caller's additional audio streams, applied once the answer is negotiated. Positional: entry i addresses the i-th accepted stream beyond the primary, in m-line order — the caller's offer decides how many exist, so an entry with no matching stream is ignored. Use POST /v1/legs/{id}/streams/{streamId}/room to re-route a stream later.
     streams: list[AnswerLegStream] | None = None
+    # Opaque application JSON attached to the leg. Any JSON value is accepted (object, array, string, number, boolean). It is echoed on the leg view and carried at the top level of every event published for this leg, so external state can be correlated without keeping a leg_id lookup table. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited). Omit to leave any existing value untouched; send null to clear it.
+    custom_data: Any = None
 
 
 class AttachStreamRoomRequest(BaseModel):
@@ -102,12 +104,14 @@ class CreateLegRequest(BaseModel):
 
     # Leg type
     type: str
-    # Destination. For sip legs, a SIP URI (e.g. "sip:alice@example.com"). For whatsapp legs, an E.164 phone number (with or without '+').
+    # Destination. For sip legs, a SIP URI (e.g. "sip:alice@example.com"); a "sips:" URI or a ";transport=tls" param sends the INVITE over TLS, and ";transport=tcp" over TCP. For whatsapp legs, an E.164 phone number (with or without '+').
     to: str | None = None
     # Deprecated alias for `to` (sip legs only). Prefer `to`.
     uri: str | None = None
     # Caller ID. A bare user-part (e.g. "+15551234567", "alice") sets the user of the SIP From header. A full SIP URI (e.g. "sip:alice@pbx.example.com") sets both the user and the host; otherwise the host comes from the matched trunk's AOR realm, falling back to SIP_DOMAIN.
     from_: str | None = Field(default=None, alias="from")
+    # Next-hop SIP proxy for this INVITE, attached as a loose "Route" header (the Request-URI is left unchanged). Overrides the matched trunk's outbound_proxy and SIP_OUTBOUND_PROXY. Ignored when "to" resolves to an AOR registered to this server, which is delivered to the registered contact instead. SIP legs only.
+    outbound_proxy: str | None = None
     # SIP Privacy header value (e.g. "id", "none")
     privacy: str | None = None
     # Seconds to wait for answer; 0 = no timeout
@@ -136,6 +140,8 @@ class CreateLegRequest(BaseModel):
     speech_detection: bool | None = None
     # For sip legs: offer Real-Time Text (ITU-T T.140 over RTP per RFC 4103) alongside audio. For websocket legs: enable the bidirectional text-message channel. Default: false.
     rtt: bool | None = None
+    # Opaque application JSON attached to the leg. Any JSON value is accepted (object, array, string, number, boolean). It is echoed on the leg view and carried at the top level of every event published for this leg, so external state can be correlated without keeping a leg_id lookup table. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited).
+    custom_data: Any = None
     # SIP outbound only. Extra m=audio sections to offer alongside the call's primary bidirectional audio, so a multi-stream call is established by the first INVITE instead of a follow-up re-INVITE. Each entry binds its own RTP port and may be mixed into its own room. To add a stream to a call that is already up, use POST /v1/legs/{id}/streams instead.
     streams: list[CreateLegStream] | None = None
     # WebSocket target URL (ws:// or wss://) for outbound websocket legs. Required when type=websocket.
@@ -235,6 +241,8 @@ class EarlyMediaLegRequest(BaseModel):
 
     # Explicit codec for the 183 Session Progress SDP. Must appear in the remote offer's offered_codecs list. Omit to use the server's default preference order.
     codec: str | None = None
+    # Opaque application JSON attached to the leg. Any JSON value is accepted (object, array, string, number, boolean). It is echoed on the leg view and carried at the top level of every event published for this leg, so external state can be correlated without keeping a leg_id lookup table. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited). Omit to leave any existing value untouched; send null to clear it.
+    custom_data: Any = None
 
 
 class ElevenLabsAgentRequest(BaseModel):
@@ -318,6 +326,15 @@ class RegistrationRejectRequest(BaseModel):
     reason: str | None = None
 
 
+class RingLegRequest(BaseModel):
+    """RingLegRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Opaque application JSON attached to the leg. Any JSON value is accepted (object, array, string, number, boolean). It is echoed on the leg view and carried at the top level of every event published for this leg, so external state can be correlated without keeping a leg_id lookup table. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited). Omit to leave any existing value untouched; send null to clear it.
+    custom_data: Any = None
+
+
 class RoomRoutingRequest(BaseModel):
     """RoomRoutingRequest."""
 
@@ -345,17 +362,17 @@ class STTRequest(BaseModel):
     language: str
     # Emit partial (non-final) transcripts
     partial: bool
-    # STT provider: "elevenlabs" (default), "deepgram" (/v1/listen), "deepgram_flux" (/v2/listen, conversational turn detection) or "azure"
+    # STT provider: "elevenlabs" (default), "deepgram" (/v1/listen), "deepgram_flux" (/v2/listen, conversational turn detection), "azure" or "speechmatics"
     provider: str | None = None
-    # API key override (falls back to ELEVENLABS_API_KEY, DEEPGRAM_API_KEY or AZURE_SPEECH_KEY env var depending on provider)
+    # API key override (falls back to ELEVENLABS_API_KEY, DEEPGRAM_API_KEY, AZURE_SPEECH_KEY or SPEECHMATICS_API_KEY env var depending on provider)
     api_key: str | None = None
-    # Provider-specific model. Deepgram: default "nova-3". Deepgram Flux: "flux-general-en" (default) or "flux-general-multi".
+    # Provider-specific model. Deepgram: default "nova-3". Deepgram Flux: "flux-general-en" (default) or "flux-general-multi". Speechmatics: "standard" (default) or "enhanced".
     model: str | None = None
-    # Terms to boost recognition of (Deepgram and Deepgram Flux).
+    # Terms to boost recognition of (Deepgram, Deepgram Flux, and Speechmatics — where they become additional_vocab).
     keyterms: list[str] | None = None
-    # Deepgram only: milliseconds of silence before a segment is finalized. 0 disables endpointing.
+    # Deepgram: milliseconds of silence before a segment is finalized; 0 disables endpointing. Speechmatics: maps to max_delay, clamped to 700-4000 ms; 0 leaves the provider default.
     endpointing: int | None = None
-    # Deepgram only: milliseconds of silence after which an stt.turn event with event=utterance_end is emitted. Deepgram requires interim results for this, which are requested automatically and still suppressed unless partial is true.
+    # Deepgram: milliseconds of silence after which an stt.turn event with event=utterance_end is emitted. Deepgram requires interim results for this, which are requested automatically and still suppressed unless partial is true. Speechmatics: milliseconds of silence that close a turn and emit an stt.turn event with event=end_of_turn — default 600, capped at 2000, and 0 disables turn detection.
     utterance_end_ms: int | None = None
     # Deepgram Flux only: end-of-turn confidence that fires an eager_end_of_turn stt.turn event, enabling speculative generation. Must be between 0.3 and 0.9. When unset, no eager_end_of_turn or turn_resumed events are emitted at all.
     eager_eot_threshold: float | None = None
@@ -365,6 +382,15 @@ class STTRequest(BaseModel):
     eot_timeout_ms: int | None = None
     # Deepgram Flux only: candidate language codes for the "flux-general-multi" model.
     language_hints: list[str] | None = None
+
+
+class SetLegCustomDataRequest(BaseModel):
+    """SetLegCustomDataRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # New opaque application JSON for the leg. Any JSON value is accepted (object, array, string, number, boolean). Replaces the existing value outright — there is no merge. Sending null clears it, the same as DELETE. Required: omitting the field is rejected with 400. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited).
+    custom_data: Any
 
 
 class SetLegRoleRequest(BaseModel):
@@ -381,7 +407,7 @@ class StartSIPRECRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # SIP URI of the session recording server, e.g. "sip:srs@recorder.example.com:5060". A recording session carries the metadata document alongside the SDP and exceeds the UDP message limit, so the target should accept TCP.
+    # SIP URI of the session recording server, e.g. "sip:srs@recorder.example.com:5060;transport=tcp". A recording session carries the metadata document alongside the SDP and exceeds the UDP message limit, so the target should accept TCP. The transport comes from the URI: ";transport=tcp", or "sips:" / ";transport=tls" for TLS.
     srs_uri: str
     # Which participants to record. Each entry is either a leg ID (that leg's own audio) or "<legID>#<streamID>" for one of a leg's secondary audio streams mixed into the room. Empty or absent records every participant. An entry that is not in the room is a 404.
     leg_ids: list[str] | None = None
@@ -510,6 +536,8 @@ class WebRTCOfferRequest(BaseModel):
     sdp: str
     # Application identifier. Carried through to all events emitted for this leg, and matched against the VSI `app_id` filter.
     app_id: str | None = None
+    # Opaque application JSON attached to the leg. Any JSON value is accepted (object, array, string, number, boolean). It is echoed on the leg view and carried at the top level of every event published for this leg, so external state can be correlated without keeping a leg_id lookup table. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited).
+    custom_data: Any = None
 
 
 class AMDParams(BaseModel):
@@ -811,6 +839,8 @@ class SIPRECSessionView(BaseModel):
     streams: list[SIPRECStreamView]
     # The raw rs-metadata XML document as most recently received.
     metadata: str | None = None
+    # What could be disproved about the metadata by the SDP it arrived with. Non-empty means the participant attributed to a stream may be wrong; the session is still recorded. Empty means nothing was disproved, which is not an assertion that the mapping is correct — an offer with no labels or no a=ssrc cname gives nothing to check against.
+    warnings: list[str] | None = None
 
 
 class SIPRECStream(BaseModel):
@@ -857,8 +887,10 @@ class SIPRegisterTrunkSpec(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Upstream registrar SIP URI (e.g. "sip:pbx.example.com:5060" or "sips:pbx.example.com:5061;transport=tls").
+    # Upstream registrar SIP URI (e.g. "sip:pbx.example.com:5060" or "sips:pbx.example.com:5061"). Transport is taken from the URI: a "sips:" scheme or a ";transport=tls" parameter selects TLS, ";transport=tcp" selects TCP, otherwise UDP. Note that "transport" is a URI parameter (";"), not a URI header ("?") — RFC 3261 section 19.1.
     registrar_uri: str
+    # Next-hop SIP proxy for this trunk's REGISTER and for outbound INVITEs placed from its AOR, attached as a loose `Route` header (the Request-URI is left unchanged, and digest auth still targets `registrar_uri`). E.g. "sip:edge.example.com:5060;transport=tcp". Defaults to `SIP_OUTBOUND_PROXY`; when neither is set, requests go straight to `registrar_uri`.
+    outbound_proxy: str | None = None
     # Address-of-record this trunk REGISTERs (e.g. "sip:alice@pbx.example.com"). Becomes the From URI on outbound REGISTER, and the From / P-Asserted-Identity host on outbound INVITEs placed `from` this AOR.
     aor: str
     # Digest auth username. Defaults to the AOR user-part when empty.
@@ -869,6 +901,8 @@ class SIPRegisterTrunkSpec(BaseModel):
     contact_user: str | None = None
     # Requested registration lifetime in seconds. Clamped to [SIP_OUTBOUND_REGISTRATION_MIN_EXPIRES_SECONDS, SIP_OUTBOUND_REGISTRATION_MAX_EXPIRES_SECONDS]. Default: SIP_OUTBOUND_REGISTRATION_DEFAULT_EXPIRES_SECONDS (3600).
     expires_seconds: int | None = None
+    # Accept this trunk's next-hop certificate without verifying it, for a `sips:` / `;transport=tls` registrar or outbound proxy whose certificate is self-signed, privately signed, or carries no SAN (`x509: certificate relies on legacy Common Name field`). Scoped to that peer's hostname — every other TLS peer is still verified in full, unlike the server-wide `SIP_TLS_INSECURE_SKIP_VERIFY`. Ignored (with a logged warning) when the next hop is not TLS, or when it is named by IP literal: such a dial sends no SNI and cannot be told apart from any other, so use `SIP_TLS_CA_FILE` or `SIP_TLS_INSECURE_SKIP_VERIFY` there. Prefer `SIP_TLS_CA_FILE` when the peer's CA can simply be trusted.
+    tls_insecure_skip_verify: bool | None = None
 
 
 class SIPRegisterTrunkView(BaseModel):
@@ -877,6 +911,7 @@ class SIPRegisterTrunkView(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     registrar_uri: str
+    outbound_proxy: str | None = None
     aor: str
     username: str | None = None
     contact_uri: str | None = None
@@ -887,6 +922,7 @@ class SIPRegisterTrunkView(BaseModel):
     call_id: str | None = None
     cseq: int | None = None
     source_address: str | None = None
+    tls_insecure_skip_verify: bool | None = None
 
 
 class STTWord(BaseModel):

@@ -173,6 +173,7 @@ class AnswerLegPayload(BaseModel):
     speech_detection: bool | None = None
     codec: str | None = None
     streams: list[AnswerLegStream] | None = None
+    custom_data: Any = None
 
 
 class BridgeCreatePayload(BaseModel):
@@ -298,6 +299,7 @@ class EarlyMediaPayload(BaseModel):
 
     id: str
     codec: str | None = None
+    custom_data: Any = None
 
 
 class IDPayload(BaseModel):
@@ -501,6 +503,15 @@ class RejectRegistrationPayload(BaseModel):
     reason: str | None = None
 
 
+class RingLegPayload(BaseModel):
+    """RingLegPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    custom_data: Any = None
+
+
 class RoomLegPayload(BaseModel):
     """RoomLegPayload."""
 
@@ -596,6 +607,15 @@ class STTStopResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     status: str | None = None
+
+
+class SetLegCustomDataPayload(BaseModel):
+    """SetLegCustomDataPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    custom_data: Any
 
 
 class SetLegRolePayload(BaseModel):
@@ -1009,6 +1029,24 @@ async def _vsi_set_leg_role(self: EventStream, payload: SetLegRolePayload) -> Le
 EventStream.set_leg_role = _vsi_set_leg_role  # type: ignore[method-assign]
 
 
+async def _vsi_set_leg_custom_data(self: EventStream, payload: SetLegCustomDataPayload) -> Leg:
+    """Replace a leg's custom_data (carried on every subsequent event for the leg)"""
+    out = await self._call("set_leg_custom_data", payload, result_model=Leg)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.set_leg_custom_data = _vsi_set_leg_custom_data  # type: ignore[method-assign]
+
+
+async def _vsi_delete_leg_custom_data(self: EventStream, payload: IDPayload) -> Leg:
+    """Clear a leg's custom_data"""
+    out = await self._call("delete_leg_custom_data", payload, result_model=Leg)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.delete_leg_custom_data = _vsi_delete_leg_custom_data  # type: ignore[method-assign]
+
+
 async def _vsi_leg_stream_list(self: EventStream, payload: IDPayload) -> list[LegStreamView]:
     """List a SIP leg's negotiated audio streams"""
     return await self._call("leg_stream_list", payload)  # type: ignore[no-any-return]
@@ -1104,7 +1142,7 @@ async def _vsi_siprec_get(self: EventStream, payload: IDPayload) -> SIPRECSessio
 EventStream.siprec_get = _vsi_siprec_get  # type: ignore[method-assign]
 
 
-async def _vsi_leg_ring(self: EventStream, payload: IDPayload) -> VSIStatusResponse:
+async def _vsi_leg_ring(self: EventStream, payload: RingLegPayload) -> VSIStatusResponse:
     """Send a 180 Ringing on a SIP inbound leg"""
     out = await self._call("leg_ring", payload, result_model=VSIStatusResponse)
     return out  # type: ignore[no-any-return]

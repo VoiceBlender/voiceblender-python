@@ -109,8 +109,16 @@ def test_known_method_names_present() -> None:
 
 
 def test_wsLeg_is_skipped() -> None:
-    """``wsLeg`` is intentionally not generated (WebSocket upgrade, not JSON)."""
+    """``wsLeg`` is intentionally not generated (WebSocket upgrade, not JSON).
+
+    A deliberate divergence from the Go client, which emits ``WsLeg`` only
+    because its ``skipOperations`` lists ``wsRoom`` and not ``wsLeg``. Both are
+    HTTP-upgrade endpoints whose sole success response is 101 Switching
+    Protocols, so a plain JSON GET can never establish a leg. Do not "restore
+    parity" here by dropping the skip — use a WebSocket client instead.
+    """
     assert "wsLeg" in generate.SKIP_OPERATIONS
+    assert "wsRoom" in generate.SKIP_OPERATIONS
     # No method that would correspond to it.
     assert not hasattr(voiceblender.Client, "ws_leg")
     assert not hasattr(voiceblender.Leg, "ws")

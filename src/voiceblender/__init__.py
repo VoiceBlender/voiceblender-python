@@ -126,11 +126,13 @@ try:
         RegistrationRejectRequest,
         RegistrationsResponse,
         RegistrationView,
+        RingLegRequest,
         RoomRoutingRequest,
         RoomRoutingUpdateRequest,
         RoomRoutingView,
         RoutingRowUpdate,
         RTTRequest,
+        SetLegCustomDataRequest,
         SetLegRoleRequest,
         SIPAuth,
         SIPRECParticipantView,
@@ -178,7 +180,7 @@ except ModuleNotFoundError as _exc:  # pragma: no cover
 # milestones (before the generator has written the files) but re-raises when
 # the module exists and its own imports fail — otherwise every method it binds
 # would vanish silently.
-for _mod in ("_legs", "_rooms", "_webrtc", "_vsi"):
+for _mod in ("_legs", "_rooms", "_webrtc", "_trunks", "_registrations", "_vsi"):
     try:
         __import__(f"voiceblender.{_mod}")
     except ModuleNotFoundError as _exc:  # pragma: no cover
@@ -291,6 +293,7 @@ __all__ = [
     "RegistrationRejectRequest",
     "RegistrationView",
     "RegistrationsResponse",
+    "RingLegRequest",
     "RoomRoutingRequest",
     "RoomRoutingUpdateRequest",
     "RoomRoutingView",
@@ -304,6 +307,7 @@ __all__ = [
     "SIPRegisterTrunkView",
     "STTRequest",
     "STTWord",
+    "SetLegCustomDataRequest",
     "SetLegRoleRequest",
     "StartSIPRECRequest",
     "TTSRequest",

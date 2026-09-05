@@ -175,3 +175,102 @@ async def test_tri_state_accept_dtmf_omits_when_unset() -> None:
 
     assert "accept_dtmf" not in captured["body"]
     assert "speech_detection" not in captured["body"]
+
+
+# ── SIP Trunks / SIP Registrations (v0.13 parity with the Go client) ──────────
+
+
+async def test_list_sip_trunks_gets_typed_list() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["method"] = req.method
+        captured["url"] = str(req.url)
+        return httpx.Response(200, json={"trunks": []})
+
+    async with _make_client(httpx.MockTransport(handler)) as c:
+        out = await c.list_sip_trunks()  # type: ignore[attr-defined]
+
+    assert captured["method"] == "GET"
+    assert captured["url"] == "http://test.invalid/v1/sip/trunks"
+    assert isinstance(out, voiceblender.TrunksListResponse)
+
+
+async def test_create_sip_trunk_posts_json() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["method"] = req.method
+        captured["url"] = str(req.url)
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(
+            201, json={"id": "trunk-1", "type": "sip_register", "status": "registering"}
+        )
+
+    async with _make_client(httpx.MockTransport(handler)) as c:
+        await c.create_sip_trunk(  # type: ignore[attr-defined]
+            voiceblender.CreateTrunkRequest(type="sip_register", app_id="app-1")
+        )
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "http://test.invalid/v1/sip/trunks"
+    assert captured["body"] == {"type": "sip_register", "app_id": "app-1"}
+
+
+async def test_delete_sip_registration_percent_encodes_the_aor() -> None:
+    """The AOR is a full SIP URI and must be encoded as one path segment.
+
+    openapi.yaml documents ``sip:alice@vb.example`` →
+    ``sip%3Aalice%40vb.example``.
+    """
+    captured: dict[str, object] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["method"] = req.method
+        # raw_path keeps the escaping; str(url) would show it decoded.
+        captured["path"] = req.url.raw_path.decode()
+        return httpx.Response(200, json={"status": "ok"})
+
+    async with _make_client(httpx.MockTransport(handler)) as c:
+        await c.delete_sip_registration("sip:alice@vb.example")  # type: ignore[attr-defined]
+
+    assert captured["method"] == "DELETE"
+    assert captured["path"] == "/v1/sip/registrations/sip%3Aalice%40vb.example"
+
+
+async def test_delete_sip_registration_escapes_uri_parameters() -> None:
+    """A ``;transport=tcp`` URI param must not split the path segment."""
+    captured: dict[str, object] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["path"] = req.url.raw_path.decode()
+        return httpx.Response(200, json={"status": "ok"})
+
+    async with _make_client(httpx.MockTransport(handler)) as c:
+        await c.delete_sip_registration(  # type: ignore[attr-defined]
+            "sip:bob@vb.example;transport=tcp"
+        )
+
+    assert captured["path"] == (
+        "/v1/sip/registrations/sip%3Abob%40vb.example%3Btransport%3Dtcp"
+    )
+
+
+async def test_accept_registration_posts_to_attempt_path() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["method"] = req.method
+        captured["url"] = str(req.url)
+        return httpx.Response(200, json={"status": "ok"})
+
+    async with _make_client(httpx.MockTransport(handler)) as c:
+        out = await c.accept_registration(  # type: ignore[attr-defined]
+            "att-1", voiceblender.RegistrationAcceptRequest()
+        )
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == (
+        "http://test.invalid/v1/sip/registrations/attempts/att-1/accept"
+    )
+    assert isinstance(out, voiceblender.StatusResponse)
