@@ -11,6 +11,8 @@ from voiceblender._playback import PlaybackRequest
 from voiceblender._requests import (
     AddLegRequest,
     AgentMessageRequest,
+    BridgeView,
+    CreateRoomBridgeRequest,
     CreateRoomRequest,
     DeepgramAgentRequest,
     ElevenLabsAgentRequest,
@@ -22,6 +24,7 @@ from voiceblender._requests import (
     StartSIPRECRequest,
     STTRequest,
     TTSRequest,
+    UpdateRoomBridgeRequest,
     VAPIAgentRequest,
     VolumeRequest,
 )
@@ -109,6 +112,79 @@ async def _room_remove_leg(self: Room, leg_id: str) -> StatusResponse:
 
 
 Room.remove_leg = _room_remove_leg  # type: ignore[method-assign]
+
+
+async def _room_list_room_bridges(self: Room) -> list[BridgeView]:
+    """List bridges involving this room"""
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    return await self._client._do_list("GET", f"/rooms/{self.id}/bridges", item_model=BridgeView)
+
+
+Room.list_room_bridges = _room_list_room_bridges  # type: ignore[method-assign]
+
+
+async def _room_create_room_bridge(self: Room, req: CreateRoomBridgeRequest) -> BridgeView:
+    """Bridge this room's mixer to another room's mixer
+
+    Joins the room in the path with `room_id` so audio flows between their mixers. Both rooms must exist and share a sample rate. `direction` is relative to the room in the path: `bidirectional`, `send` (path room → other), `receive` (other → path room), or `none` (allocated but silent). Bridging rooms into a cycle with feedback-enabled directions causes audio feedback — use one-way directions to break loops.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/rooms/{self.id}/bridges", body=req, out_model=BridgeView
+    )
+    assert out is not None, "createRoomBridge" + ": empty response"
+    return out
+
+
+Room.create_room_bridge = _room_create_room_bridge  # type: ignore[method-assign]
+
+
+async def _room_get_room_bridge(self: Room, bridge_id: str) -> BridgeView:
+    """Get a bridge involving this room"""
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "GET", f"/rooms/{self.id}/bridges/{bridge_id}", out_model=BridgeView
+    )
+    assert out is not None, "getRoomBridge" + ": empty response"
+    return out
+
+
+Room.get_room_bridge = _room_get_room_bridge  # type: ignore[method-assign]
+
+
+async def _room_update_room_bridge(
+    self: Room, bridge_id: str, req: UpdateRoomBridgeRequest
+) -> BridgeView:
+    """Change a bridge's audio flow direction
+
+    Live-updates the direction (relative to the room in the path) without interrupting audio.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "PATCH", f"/rooms/{self.id}/bridges/{bridge_id}", body=req, out_model=BridgeView
+    )
+    assert out is not None, "updateRoomBridge" + ": empty response"
+    return out
+
+
+Room.update_room_bridge = _room_update_room_bridge  # type: ignore[method-assign]
+
+
+async def _room_delete_room_bridge(self: Room, bridge_id: str) -> StatusResponse:
+    """Tear down a bridge"""
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "DELETE", f"/rooms/{self.id}/bridges/{bridge_id}", out_model=StatusResponse
+    )
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Room.delete_room_bridge = _room_delete_room_bridge  # type: ignore[method-assign]
 
 
 async def _room_get_routing(self: Room) -> RoomRoutingView:

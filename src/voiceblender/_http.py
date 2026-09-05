@@ -6,6 +6,7 @@ Port of the ``do`` / ``encodeJSON`` helpers in ``client.go:68-112``.
 from __future__ import annotations
 
 from typing import Any, Protocol, TypeVar, runtime_checkable
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel
@@ -41,6 +42,25 @@ def encode_json(value: Any) -> Any:
     if isinstance(value, _WireSerializable):
         return value.to_wire()
     return value
+
+
+def path_escape(value: str) -> str:
+    """Percent-encode *value* for use as a single URL path segment.
+
+    Everything outside RFC 3986's unreserved set (alphanumerics and ``-_.~``)
+    is escaped. Needed for the SIP AOR path param of
+    ``DELETE /sip/registrations/{aor}``, which is a full SIP URI: openapi.yaml
+    documents the encoding as ``sip:alice@vb.example`` →
+    ``sip%3Aalice%40vb.example``, and an unescaped ``/`` or ``;transport=tcp``
+    would otherwise split the path.
+
+    Note this is deliberately *stricter* than the Go client's
+    ``url.PathEscape`` (``registrations.go``), which leaves ``:`` and ``@``
+    raw despite its own comment saying they must be escaped — a Go-side bug.
+    Over-escaping is safe: a conforming server percent-decodes the segment to
+    the same AOR either way.
+    """
+    return quote(value, safe="")
 
 
 async def request_json(

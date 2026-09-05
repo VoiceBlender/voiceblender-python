@@ -113,6 +113,8 @@ module = [
     "voiceblender._legs",
     "voiceblender._rooms",
     "voiceblender._webrtc",
+    "voiceblender._trunks",
+    "voiceblender._registrations",
     "voiceblender._vsi",
 ]
 disable_error_code = [

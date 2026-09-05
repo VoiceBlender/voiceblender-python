@@ -24,7 +24,9 @@ from voiceblender._requests import (
     LegStreamView,
     PipecatAgentRequest,
     RecordingRequest,
+    RingLegRequest,
     RTTRequest,
+    SetLegCustomDataRequest,
     SetLegRoleRequest,
     SIPRECSessionView,
     StartSIPRECRequest,
@@ -57,7 +59,7 @@ Client.list_legs = _client_list_legs  # type: ignore[method-assign]
 async def _client_create_leg(self: Client, req: CreateLegRequest) -> Leg:
     """Originate an outbound leg
 
-    Originate a new outbound leg. The `type` field selects the transport: `sip` originates a SIP INVITE; `whatsapp` originates a WhatsApp call through Meta; `websocket` dials a remote WebSocket endpoint (audio is PCM in either binary or `json_base64` framing, with bidirectional text and caller-supplied X-/P- headers).
+    Originate a new outbound leg. The `type` field selects the transport: `sip` originates a SIP INVITE; `whatsapp` originates a WhatsApp call through Meta; `websocket` dials a remote WebSocket endpoint (audio is PCM in either binary or `json_base64` framing, with bidirectional text and caller-supplied X-/P- headers). For `sip` legs, `outbound_proxy` sets the next hop for this INVITE as a loose `Route` header, leaving the Request-URI unchanged. It outranks the matched trunk's `outbound_proxy` and `SIP_OUTBOUND_PROXY`; a `to` that resolves to an AOR registered to this server outranks all three and is delivered to the bound contact.
     """
     out = await self._do("POST", "/legs", body=req, out_model=Leg)
     if out is not None:
@@ -131,14 +133,16 @@ async def _leg_answer(self: Leg, req: AnswerLegRequest) -> StatusResponse:
 Leg.answer = _leg_answer  # type: ignore[method-assign]
 
 
-async def _leg_ring(self: Leg) -> StatusResponse:
+async def _leg_ring(self: Leg, req: RingLegRequest) -> StatusResponse:
     """Send 180 Ringing on a ringing inbound SIP leg (asynchronous)
 
     Queues a SIP 180 Ringing provisional response with no SDP. Use when `SIP_AUTO_RINGING=false` (the default) and you want to indicate alerting before deciding to early-media or answer. Idempotent: each call emits another 180 — receivers tolerate re-sends. The HTTP call returns 202 as soon as the request is validated; SIP-level send failures surface as `leg.command_failed` with `command="ring"`.
     """
     if self._client is None:
         raise RuntimeError(f"{type(self).__name__} not bound to a Client")
-    out = await self._client._do("POST", f"/legs/{self.id}/ring", out_model=StatusResponse)
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/ring", body=req, out_model=StatusResponse
+    )
     return out if out is not None else StatusResponse(status="ok")
 
 
@@ -200,6 +204,31 @@ async def _leg_unmute(self: Leg) -> StatusResponse:
 
 
 Leg.unmute = _leg_unmute  # type: ignore[method-assign]
+
+
+async def _leg_deaf_leg(self: Leg) -> StatusResponse:
+    """Deafen a leg
+
+    A deaf leg stops receiving the room mix. Its own audio is still contributed to the mix and still reaches taps (recording/STT) unless it is also muted.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("POST", f"/legs/{self.id}/deaf", out_model=StatusResponse)
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.deaf_leg = _leg_deaf_leg  # type: ignore[method-assign]
+
+
+async def _leg_undeaf_leg(self: Leg) -> StatusResponse:
+    """Undeafen a leg"""
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("DELETE", f"/legs/{self.id}/deaf", out_model=StatusResponse)
+    return out if out is not None else StatusResponse(status="ok")
+
+
+Leg.undeaf_leg = _leg_undeaf_leg  # type: ignore[method-assign]
 
 
 async def _leg_hold(self: Leg) -> StatusResponse:
@@ -578,7 +607,7 @@ Leg.stop_stt = _leg_stop_stt  # type: ignore[method-assign]
 async def _leg_finalize_stt_leg(self: Leg) -> StatusResponse:
     """Flush the STT buffer on a leg without stopping STT
 
-    Forces the provider to emit a final transcript for the audio buffered so far while the session keeps running, so a caller that knows the speaker has finished does not have to wait for the provider's own endpointing. Only the `deepgram` provider supports this; `deepgram_flux`, `azure` and `elevenlabs` answer 501 — /v2/listen has no flush message, and Flux reports turn ends itself on stt.turn. The flushed transcript arrives on the usual stt.text event with is_final true — a segment containing no speech produces no event at all, so do not block on one.
+    Forces the provider to emit a final transcript for the audio buffered so far while the session keeps running, so a caller that knows the speaker has finished does not have to wait for the provider's own endpointing. Only the `deepgram` and `speechmatics` providers support this; `deepgram_flux`, `azure` and `elevenlabs` answer 501 — /v2/listen has no flush message, and Flux reports turn ends itself on stt.turn. On `speechmatics` the flush also emits an stt.turn end_of_turn event, because it is a forced end of utterance. The flushed transcript arrives on the usual stt.text event with is_final true — a segment containing no speech produces no event at all, so do not block on one.
     """
     if self._client is None:
         raise RuntimeError(f"{type(self).__name__} not bound to a Client")
@@ -852,5 +881,39 @@ async def _leg_set_role(self: Leg, req: SetLegRoleRequest) -> Leg:
 
 
 Leg.set_role = _leg_set_role  # type: ignore[method-assign]
+
+
+async def _leg_set_leg_custom_data(self: Leg, req: SetLegCustomDataRequest) -> Leg:
+    """Replace a leg's custom data
+
+    Replaces the leg's `custom_data` outright — there is no merge. The new value is carried at the top level of every event published for this leg from the next event onwards, and is released after `leg.disconnected`. Sending `null` clears it, the same as DELETE.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("PUT", f"/legs/{self.id}/custom-data", body=req, out_model=Leg)
+    if out is not None:
+        out._client = self._client
+    assert out is not None, "setLegCustomData" + ": empty response"
+    return out
+
+
+Leg.set_leg_custom_data = _leg_set_leg_custom_data  # type: ignore[method-assign]
+
+
+async def _leg_delete_leg_custom_data(self: Leg) -> Leg:
+    """Clear a leg's custom data
+
+    Removes the leg's `custom_data`. Subsequent events for this leg omit the field. Idempotent: clearing a leg that has none succeeds.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("DELETE", f"/legs/{self.id}/custom-data", out_model=Leg)
+    if out is not None:
+        out._client = self._client
+    assert out is not None, "deleteLegCustomData" + ": empty response"
+    return out
+
+
+Leg.delete_leg_custom_data = _leg_delete_leg_custom_data  # type: ignore[method-assign]
 
 _unused: tuple = (Leg, Room)

@@ -11,6 +11,8 @@ but as Python::
     _legs.py      — async methods bound onto Client / Leg under the "Legs" tag
     _rooms.py     — async methods bound onto Client / Room under the "Rooms" tag
     _webrtc.py    — async methods bound onto Client / Leg under the "WebRTC" tag
+    _trunks.py    — async methods bound onto Client under the "SIP Trunks" tag
+    _registrations.py — Client methods under the "SIP Registrations" tag
     _vsi.py       — async VSI command methods bound onto EventStream
 
 The generator is **incremental across milestones**: each ``gen_*`` function may
@@ -298,6 +300,25 @@ METHOD_NAME_OVERRIDES: dict[str, str] = {
     "agentRoomPipecat": "pipecat_agent",
     "agentRoomDeepgram": "deepgram_agent",
     "agentRoomMessage": "agent_message",
+    # SIP trunks / registrations: the operationIds embed the "SIP" acronym, and
+    # the registration-attempt names are shortened to match their VSI
+    # counterparts in _vsi.py. Mirrors Go's methodNameOverrides.
+    "createSIPTrunk": "create_sip_trunk",
+    "listSIPTrunks": "list_sip_trunks",
+    "getSIPTrunk": "get_sip_trunk",
+    "deleteSIPTrunk": "delete_sip_trunk",
+    "listSIPRegistrations": "list_sip_registrations",
+    "deleteSIPRegistration": "delete_sip_registration",
+    "challengeSIPRegistrationAttempt": "challenge_registration",
+    "acceptSIPRegistrationAttempt": "accept_registration",
+    "rejectSIPRegistrationAttempt": "reject_registration",
+}
+
+# Operation ID → path params that must be percent-encoded before being spliced
+# into the URL. An AOR is a full SIP URI, so a "/" or ";transport=..." in it
+# would otherwise split the path. Port of Go's ``pathEscapeParams``.
+PATH_ESCAPE_PARAMS: dict[str, list[str]] = {
+    "deleteSIPRegistration": ["aor"],
 }
 
 # Operation IDs forced to the Client receiver even though their path matches a
@@ -332,6 +353,12 @@ REQUEST_TYPE_OVERRIDES: dict[str, str] = {
 # Go's generated ``WsLeg`` is dead.
 SKIP_OPERATIONS = {
     "wsRoom",
+    # Deliberate divergence from Go, which emits WsLeg because its
+    # ``skipOperations`` lists wsRoom but not wsLeg. Both are HTTP-upgrade
+    # endpoints whose only success response is 101 Switching Protocols; a
+    # plain JSON GET from httpx (or net/http) never sends upgrade headers, so
+    # the generated method cannot establish a leg. Keep skipping both — use a
+    # WebSocket client against /legs/websocket instead.
     "wsLeg",
     "vsi",
     "getMetrics",
@@ -346,6 +373,8 @@ TAG_FILE: dict[str, str] = {
     "Legs": "_legs.py",
     "Rooms": "_rooms.py",
     "WebRTC": "_webrtc.py",
+    "SIP Trunks": "_trunks.py",
+    "SIP Registrations": "_registrations.py",
 }
 
 # AsyncAPI schemas are skipped in ``_vsi.py`` when the same class is already
@@ -1219,12 +1248,19 @@ def _resource_scope(path: str, params: list[str]) -> tuple[str, list[str]]:
     return "Client", list(params)
 
 
-def _build_py_path(path: str, recv: str) -> str:
+def _build_py_path(path: str, recv: str, op_id: str = "") -> str:
     """Translate ``/legs/{id}/play/{playbackID}`` into an f-string expression.
 
     On a receiver method the leading ``{id}`` becomes ``{self.id}``; subsequent
-    params keep their snake_case names so they line up with method args.
+    params keep their snake_case names so they line up with method args. Params
+    listed in :data:`PATH_ESCAPE_PARAMS` are wrapped in ``path_escape(...)``.
     """
+    escaped = set(PATH_ESCAPE_PARAMS.get(op_id, ()))
+
+    def _arg(param: str) -> str:
+        name = _safe_py_name(snake(param))
+        return f"{{path_escape({name})}}" if param in escaped else "{" + name + "}"
+
     if recv in ("Leg", "Room"):
         # First {id} → self.id; later params remain as named args (snake_case).
         replaced_first = False
@@ -1235,11 +1271,11 @@ def _build_py_path(path: str, recv: str) -> str:
             if not replaced_first:
                 replaced_first = True
                 return "{self.id}"
-            return "{" + _safe_py_name(snake(param)) + "}"
+            return _arg(param)
 
         return _PATH_PARAM_RE.sub(repl, path)
     # Client receiver: all params are method args.
-    return _PATH_PARAM_RE.sub(lambda m: "{" + _safe_py_name(snake(m.group(1))) + "}", path)
+    return _PATH_PARAM_RE.sub(lambda m: _arg(m.group(1)), path)
 
 
 def _resolve_request_type(op_id: str, op: dict[str, Any]) -> str:
@@ -1263,7 +1299,9 @@ def _resolve_response_type(op_id: str, op: dict[str, Any]) -> tuple[str, bool]:
     if op_id in RESPONSE_TYPE_OVERRIDES:
         return RESPONSE_TYPE_OVERRIDES[op_id], False
     responses = op.get("responses") or {}
-    for code in ("200", "201"):
+    # 200, then 201/202 — async accepts that still carry a body (createSIPTrunk
+    # answers 202 with a CreateTrunkResponse). Mirrors Go's resolveResponseType.
+    for code in ("200", "201", "202"):
         resp = responses.get(code) or responses.get(int(code))  # YAML may emit int keys
         if not resp:
             continue
@@ -1372,6 +1410,8 @@ def gen_methods_for_tag(tag: str, ops: list[OpInfo]) -> str:
     e = Emitter()
     e.add_import("from voiceblender._client import Client")
     e.add_import("from voiceblender._models import Leg, Room")
+    if any(op.operation_id in PATH_ESCAPE_PARAMS for op in ops):
+        e.add_import("from voiceblender._http import path_escape")
 
     # Collect imports for request/response types, grouped by module.
     used_classes: set[str] = set()
@@ -1410,7 +1450,7 @@ def gen_methods_for_tag(tag: str, ops: list[OpInfo]) -> str:
 def _emit_one_method(e: Emitter, op: OpInfo) -> None:
     method = _py_method_name(op.operation_id)
     recv = op.receiver
-    f_path = _build_py_path(op.path, recv)
+    f_path = _build_py_path(op.path, recv, op.operation_id)
     self_param, target_cls = (
         ("self: Client", "Client") if recv == "Client" else (f"self: {recv}", recv)
     )

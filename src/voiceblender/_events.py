@@ -797,12 +797,18 @@ class STTTextEvent(Event):
     # Room identifier
     room_id: str | None = None
     app_id: str | None = None
+    # Which of the leg's audio streams this came from. Empty when the leg's audio is the call itself; set for a recording session, where each stream is a different party. Resolve it through GET /v1/legs/{id}/siprec
+    stream_id: str | None = None
     # Transcribed text
     text: str | None = None
     # Whether this is a final or partial transcript
     is_final: bool | None = None
     # Whether the speaker stopped talking, as opposed to is_final's 'this segment will not change again'. Deepgram only; always false for providers that do not report it
     speech_final: bool | None = None
+    # Where in the stream this was said, in milliseconds from the first audio the transcriber was given. Absent when the provider reports no timing. Not the same as the event's arrival time, which is when the provider finished rather than when the words were spoken
+    audio_start_ms: int | None = None
+    # End of the span audio_start_ms opens
+    audio_end_ms: int | None = None
 
 
 class STTTurnEvent(Event):
@@ -815,6 +821,8 @@ class STTTurnEvent(Event):
     # Room identifier
     room_id: str | None = None
     app_id: str | None = None
+    # Which of the leg's audio streams this turn belongs to. Empty when the leg's audio is the call itself. See stt.text.stream_id
+    stream_id: str | None = None
     # Turn boundary: start_of_turn, update, eager_end_of_turn, turn_resumed or end_of_turn (Deepgram Flux), or utterance_end (Deepgram, when utterance_end_ms is set). New values may be added
     event: str | None = None
     # Index of the turn within the session, incrementing after each end_of_turn
