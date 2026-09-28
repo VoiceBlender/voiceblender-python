@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
+from voiceblender._requests import FilterSpec
+
 if TYPE_CHECKING:
     from voiceblender._client import Client
 from enum import Enum
@@ -144,6 +146,8 @@ class Leg(BaseModel):
     headers: dict[str, str] | None = None
     # Opaque application JSON attached to the leg. Any JSON value is accepted (object, array, string, number, boolean). It is echoed on the leg view and carried at the top level of every event published for this leg, so external state can be correlated without keeping a leg_id lookup table. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited).
     custom_data: Any = None
+    # The ingress audio filter chain that actually runs for this leg, after applying the server default and dropping any filter whose backing resource is unavailable. Absent when no processing is applied. Compare with the `filters` sent at creation to see what was dropped.
+    filters: list[FilterSpec] | None = None
 
     _client: Client | None = PrivateAttr(default=None)
 

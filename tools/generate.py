@@ -853,6 +853,18 @@ def gen_models(
     alias so the generated files that reference them still resolve.
     """
     e = Emitter()
+    # Leg/Room may reference component schemas that gen_requests emits (e.g.
+    # Leg.filters → FilterSpec). Go keeps everything in one package; here they
+    # need a real runtime import so Pydantic can resolve the annotation.
+    # _requests.py imports nothing from _models.py, so there is no cycle.
+    local = {"Leg", "Room", "WebhookEventType", *placeholders}
+    requests_refs = sorted(
+        class_name(n)
+        for n in spec_refs([schemas.get("Leg"), schemas.get("Room")])
+        if n not in SCHEMAS_EMITTED_ELSEWHERE and class_name(n) not in local
+    )
+    if requests_refs:
+        e.add_import(f"from voiceblender._requests import {', '.join(requests_refs)}")
     e.add_typing("TYPE_CHECKING")
     e.add_import("if TYPE_CHECKING:")
     e.add_import("    from voiceblender._client import Client")
