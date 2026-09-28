@@ -27,6 +27,7 @@ from voiceblender._requests import (
     RingLegRequest,
     RTTRequest,
     SetLegCustomDataRequest,
+    SetLegFiltersRequest,
     SetLegRoleRequest,
     SIPRECSessionView,
     StartSIPRECRequest,
@@ -881,6 +882,23 @@ async def _leg_set_role(self: Leg, req: SetLegRoleRequest) -> Leg:
 
 
 Leg.set_role = _leg_set_role  # type: ignore[method-assign]
+
+
+async def _leg_set_leg_filters(self: Leg, req: SetLegFiltersRequest) -> Leg:
+    """Replace a leg's audio filter chain
+
+    Replaces the ingress audio processing running on a live leg. Any chain can be swapped for any other, including enabling or disabling `denoise`, which runs at the rate the leg and room already agreed on and so adds no resampling. A change that did alter the chain's working rate is handled by rebuilding it behind a short fade rather than being refused. An empty array stops all processing. The change is staged and lands on the next audio block, so the response reports the requested chain. The leg must be in a room, since the chain lives on its mixer participant.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do("PUT", f"/legs/{self.id}/filters", body=req, out_model=Leg)
+    if out is not None:
+        out._client = self._client
+    assert out is not None, "setLegFilters" + ": empty response"
+    return out
+
+
+Leg.set_leg_filters = _leg_set_leg_filters  # type: ignore[method-assign]
 
 
 async def _leg_set_leg_custom_data(self: Leg, req: SetLegCustomDataRequest) -> Leg:

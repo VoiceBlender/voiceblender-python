@@ -64,6 +64,8 @@ class AnswerLegRequest(BaseModel):
 
     # If true, emit speaking.started and speaking.stopped events for this leg. If false, suppress them. Omit to use the server default (SPEECH_DETECTION_ENABLED env var, default false).
     speech_detection: bool | None = None
+    # Ordered audio processing chain applied to audio arriving from this leg, before it reaches the room mixer and therefore before other legs, recordings and speech-to-text see it. Each entry names a built-in filter and may carry parameters. Omit the field to use the server default (AUDIO_FILTERS env var); send an empty array for no processing. Filters run in the order given, and corrective filters should precede effects. Known filters: denoise (background noise suppression), bandpass (low_hz, high_hz), gain (volume, -8 to 8 in ~3 dB steps). Noise suppression removes background noise, not competing speech.
+    filters: list[FilterSpec] | None = None
     # Explicit codec for the answer SDP. Must appear in the remote offer's offered_codecs list. Omit to use the server's default preference order.
     codec: str | None = None
     # Rooms for the caller's additional audio streams, applied once the answer is negotiated. Positional: entry i addresses the i-th accepted stream beyond the primary, in m-line order — the caller's offer decides how many exist, so an entry with no matching stream is ignored. Use POST /v1/legs/{id}/streams/{streamId}/room to re-route a stream later.
@@ -95,6 +97,7 @@ class ChallengeRequest(BaseModel):
     algorithm: str | None = None
     qop: list[str] | None = None
     max_expires: int | None = None
+    app_id: str | None = None
 
 
 class CreateLegRequest(BaseModel):
@@ -138,6 +141,8 @@ class CreateLegRequest(BaseModel):
     app_id: str | None = None
     # If true, emit speaking.started and speaking.stopped events for this leg. If false, suppress them. Omit to use the server default (SPEECH_DETECTION_ENABLED env var, default false).
     speech_detection: bool | None = None
+    # Ordered audio processing chain applied to audio arriving from this leg, before it reaches the room mixer and therefore before other legs, recordings and speech-to-text see it. Each entry names a built-in filter and may carry parameters. Omit the field to use the server default (AUDIO_FILTERS env var); send an empty array for no processing. Filters run in the order given, and corrective filters should precede effects. Known filters: denoise (background noise suppression), bandpass (low_hz, high_hz), gain (volume, -8 to 8 in ~3 dB steps), pitch (shifts the voice up or down in semitones; semitones, mix), robotic (metallic voice effect that keeps speech easy to follow; pitch_hz, depth, mix), vocoder (a stronger, fully synthetic robot voice that is noticeably harder to understand; carrier_hz, bands, mix). Noise suppression removes background noise, not competing speech.
+    filters: list[FilterSpec] | None = None
     # For sip legs: offer Real-Time Text (ITU-T T.140 over RTP per RFC 4103) alongside audio. For websocket legs: enable the bidirectional text-message channel. Default: false.
     rtt: bool | None = None
     # Opaque application JSON attached to the leg. Any JSON value is accepted (object, array, string, number, boolean). It is echoed on the leg view and carried at the top level of every event published for this leg, so external state can be correlated without keeping a leg_id lookup table. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited).
@@ -184,6 +189,8 @@ class CreateRoomRequest(BaseModel):
     app_id: str | None = None
     # Mixer sample rate in Hz. Allowed values: 8000, 16000, 48000. Default: 16000.
     sample_rate: int | None = None
+    # Inject low-level comfort noise (~-75 dBFS) into otherwise silent mixer frames for this room. Omit to use the server default (`COMFORT_NOISE_ENABLED`).
+    comfort_noise: bool | None = None
 
 
 class CreateTrunkRequest(BaseModel):
@@ -315,6 +322,7 @@ class RegistrationAcceptRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     max_expires: int | None = None
+    app_id: str | None = None
 
 
 class RegistrationRejectRequest(BaseModel):
@@ -391,6 +399,15 @@ class SetLegCustomDataRequest(BaseModel):
 
     # New opaque application JSON for the leg. Any JSON value is accepted (object, array, string, number, boolean). Replaces the existing value outright — there is no merge. Sending null clears it, the same as DELETE. Required: omitting the field is rejected with 400. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited).
     custom_data: Any
+
+
+class SetLegFiltersRequest(BaseModel):
+    """SetLegFiltersRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # The chain to run from now on, replacing whatever is running. Send an empty array to stop all processing. Any change is allowed, including enabling or disabling denoise, which runs at the rate the leg and room already agreed on and so adds no resampling. A change that did alter the chain's working rate rebuilds the resamplers behind a short fade instead of being refused. The change is staged and takes effect on the next audio block.
+    filters: list[FilterSpec]
 
 
 class SetLegRoleRequest(BaseModel):
@@ -635,6 +652,17 @@ class CreateTrunkResponse(BaseModel):
     status: str
 
 
+class FilterSpec(BaseModel):
+    """FilterSpec."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Filter name.
+    type: str
+    # Filter parameters as name/value pairs. Unknown names are ignored; out-of-range values are rejected. bandpass takes low_hz (default 300) and high_hz (default 3400); gain takes volume (-8 to 8, ~3 dB per step); pitch takes semitones (-12 to 12, default -5) and mix (0-1, default 1); robotic takes pitch_hz (50-500, default 110), depth (0-0.95, default 0.75) and mix (0-1, default 1); vocoder takes carrier_hz (40-400, default 110), bands (4-32, default 20) and mix (0-1, default 1); denoise takes none.
+    params: dict[str, float] | None = None
+
+
 class IPIPTrunkSpec(BaseModel):
     """IPIPTrunkSpec."""
 
@@ -671,9 +699,9 @@ class LegStreamView(BaseModel):
     direction: str
     # Direction requested by the application. Survives hold/unhold, unlike the negotiated direction.
     desired_direction: str | None = None
-    # Codec negotiated for this stream. Streams on one leg may use different codecs.
+    # Codec the stream's media pipeline is actually running, which after a mid-call re-INVITE is the renegotiated one. Streams on one leg may use different codecs.
     codec: str | None = None
-    # Native sample rate of the stream's codec, in Hz.
+    # Native sample rate of the codec the stream is running, in Hz. It follows a mid-call codec renegotiation.
     sample_rate: int | None = None
     # Local RTP port. Each stream binds its own port; a shared transport is undefined without BUNDLE (RFC 9143).
     local_port: int | None = None

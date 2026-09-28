@@ -18,6 +18,7 @@ from voiceblender._requests import (
     CreateRoomRequest,
     CreateTrunkRequest,
     CreateTrunkResponse,
+    FilterSpec,
     ICECandidateInit,
     LegStreamView,
     RegistrationsResponse,
@@ -42,6 +43,7 @@ class AcceptRegistrationPayload(BaseModel):
 
     id: str
     max_expires: int | None = None
+    app_id: str | None = None
 
 
 class AcceptTransferPayload(BaseModel):
@@ -174,6 +176,7 @@ class AnswerLegPayload(BaseModel):
     codec: str | None = None
     streams: list[AnswerLegStream] | None = None
     custom_data: Any = None
+    filters: list[FilterSpec] | None = None
 
 
 class BridgeCreatePayload(BaseModel):
@@ -227,6 +230,7 @@ class ChallengeLegPayload(BaseModel):
     algorithm: str | None = None
     qop: list[str] | None = None
     max_expires: int | None = None
+    app_id: str | None = None
 
 
 class ChallengeRegistrationPayload(BaseModel):
@@ -242,6 +246,7 @@ class ChallengeRegistrationPayload(BaseModel):
     algorithm: str | None = None
     qop: list[str] | None = None
     max_expires: int | None = None
+    app_id: str | None = None
 
 
 class CompleteTransferPayload(BaseModel):
@@ -616,6 +621,15 @@ class SetLegCustomDataPayload(BaseModel):
 
     id: str
     custom_data: Any
+
+
+class SetLegFiltersPayload(BaseModel):
+    """SetLegFiltersPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    filters: list[FilterSpec]
 
 
 class SetLegRolePayload(BaseModel):
@@ -1027,6 +1041,15 @@ async def _vsi_set_leg_role(self: EventStream, payload: SetLegRolePayload) -> Le
 
 
 EventStream.set_leg_role = _vsi_set_leg_role  # type: ignore[method-assign]
+
+
+async def _vsi_set_leg_filters(self: EventStream, payload: SetLegFiltersPayload) -> Leg:
+    """Replace the audio filter chain running on a live leg"""
+    out = await self._call("set_leg_filters", payload, result_model=Leg)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.set_leg_filters = _vsi_set_leg_filters  # type: ignore[method-assign]
 
 
 async def _vsi_set_leg_custom_data(self: EventStream, payload: SetLegCustomDataPayload) -> Leg:
