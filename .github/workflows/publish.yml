@@ -1,0 +1,131 @@
+name: publish
+
+# Pushing a `vX.Y.Z` tag publishes that version to PyPI — the CI equivalent of
+# `make publish`. hatch-vcs derives the version from the tag, so the tag is the
+# whole release.
+#
+# Running it by hand (Actions → publish → Run workflow, with a tag selected as
+# the ref) uploads to TestPyPI by default — the equivalent of
+# `make publish-test`.
+#
+# Uploads authenticate with an API token, the same kind `make publish` takes in
+# TWINE_PASSWORD. Store one per index as a repository secret (Settings →
+# Secrets and variables → Actions):
+#
+#     PYPI_API_TOKEN        token from pypi.org
+#     TEST_PYPI_API_TOKEN   token from test.pypi.org (manual runs only)
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Index to upload to
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+      spec_ref:
+        description: VoiceBlender ref to read the specs from (default — the matching release tag)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  SPEC_REPO: VoiceBlender/voiceblender
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: voiceblender-python
+    steps:
+      # Full history + tags: hatch-vcs runs `git describe` to find the version.
+      - uses: actions/checkout@v5
+        with:
+          path: voiceblender-python
+          fetch-depth: 0
+
+      # The test suite regenerates the SDK from the specs and compares it with
+      # the committed output, so it needs the specs of the release this SDK
+      # version was generated from — not master, which may already be ahead.
+      # Use the same tag when the server has one, otherwise the newest tag in
+      # the same minor series (an SDK-only patch release has no server twin).
+      - name: resolve spec ref
+        id: spec
+        env:
+          SPEC_REF: ${{ inputs.spec_ref }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::run this workflow from a vX.Y.Z tag, not $GITHUB_REF_TYPE '$GITHUB_REF_NAME'"
+            exit 1
+          fi
+          ref="$SPEC_REF"
+          if [ -z "$ref" ]; then
+            tags="$(git ls-remote --tags --refs "https://github.com/$SPEC_REPO.git" 'v*' | sed 's|.*refs/tags/||')"
+            if grep -qxF "$GITHUB_REF_NAME" <<<"$tags"; then
+              ref="$GITHUB_REF_NAME"
+            else
+              series="${GITHUB_REF_NAME%.*}."
+              ref="$(awk -v p="$series" 'index($0, p) == 1' <<<"$tags" | sort -V | tail -n1)"
+            fi
+          fi
+          if [ -z "$ref" ]; then
+            echo "::error::no $SPEC_REPO tag matches $GITHUB_REF_NAME — re-run by hand with spec_ref set"
+            exit 1
+          fi
+          echo "specs from $SPEC_REPO@$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      # Checked out next to the SDK, where the Makefile and tests expect it
+      # (../VoiceBlender).
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ env.SPEC_REPO }}
+          ref: ${{ steps.spec.outputs.ref }}
+          path: VoiceBlender
+          sparse-checkout: |
+            openapi.yaml
+            asyncapi.yaml
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: voiceblender-python/pyproject.toml
+
+      - name: install
+        run: make install-dev
+
+      # lint + typecheck + test, then a fresh sdist + wheel and `twine check`.
+      - name: package
+        run: make package
+
+      - name: release check
+        run: make release-check
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: dist
+          path: voiceblender-python/dist/
+          if-no-files-found: error
+
+  # Kept apart from the build so the job that sees the token runs nothing but
+  # the upload.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: dist
+          path: dist
+      # Attestations need trusted publishing, so they are off with a token.
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
+          password: ${{ inputs.repository == 'testpypi' && secrets.TEST_PYPI_API_TOKEN || secrets.PYPI_API_TOKEN }}
+          attestations: false

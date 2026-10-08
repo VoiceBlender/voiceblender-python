@@ -64,6 +64,9 @@ release-check:
 # The version is the git tag: tag `vX.Y.Z`, then run this. PyPI accepts a given
 # version exactly once, and deleting a release does not free the number for
 # re-upload, so a tag is effectively immutable once published.
+#
+# Pushing the tag already does this in CI (.github/workflows/publish.yml), so
+# this target is the manual fallback — don't run both for the same tag.
 # Credentials come from ~/.pypirc, or from the environment:
 #
 #     TWINE_USERNAME=__token__ TWINE_PASSWORD=pypi-<api-token> make publish
