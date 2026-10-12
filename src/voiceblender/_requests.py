@@ -115,9 +115,11 @@ class CreateLegRequest(BaseModel):
     from_: str | None = Field(default=None, alias="from")
     # Next-hop SIP proxy for this INVITE, attached as a loose "Route" header (the Request-URI is left unchanged). Overrides the matched trunk's outbound_proxy and SIP_OUTBOUND_PROXY. Ignored when "to" resolves to an AOR registered to this server, which is delivered to the registered contact instead. SIP legs only.
     outbound_proxy: str | None = None
+    # ID of the SIP trunk (POST /v1/sip/trunks) to place this call through. The trunk supplies the route to its upstream, its digest credentials and, unless "from" names a host, the From realm; when "from" is omitted the trunk's AOR is used. Takes precedence over selecting a trunk by matching "from" against trunk AORs. An unknown ID is rejected with 404. SIP legs only.
+    trunk_id: str | None = None
     # SIP Privacy header value (e.g. "id", "none")
     privacy: str | None = None
-    # Seconds to wait for answer; 0 = no timeout
+    # Seconds to wait for answer (sip) or for the handshake (websocket) before the leg is ended with reason ring_timeout. Defaults to 60 when omitted; 0 = no timeout.
     ring_timeout: int | None = None
     # Maximum call duration in seconds after connect. Automatically hung up when reached. 0 or omitted = no limit.
     max_duration: int | None = None
@@ -198,13 +200,13 @@ class CreateTrunkRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Trunk type discriminator. Only `sip_register` is implemented today; `ip_ip` is reserved and returns 501.
+    # Trunk type discriminator. `sip_register` REGISTERs to an upstream registrar; `ip_ip` peers with a fixed upstream without registering.
     type: str
     # Application identifier carried through to every event emitted by this trunk.
     app_id: str | None = None
     # Required when type == "sip_register". Configures the outbound REGISTER (registrar URI, AOR, digest credentials, expiry).
     sip_register: Any = None
-    # Reserved for static-IP peering (no REGISTER). Not yet implemented; supplying this returns 501.
+    # Required when type == "ip_ip". Configures static peering with a fixed upstream (peer URI, optional digest credentials, inbound source addresses, OPTIONS health check).
     ip_ip: Any = None
 
 
@@ -406,7 +408,7 @@ class SetLegFiltersRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # The chain to run from now on, replacing whatever is running. Send an empty array to stop all processing. Any change is allowed, including enabling or disabling denoise, which runs at the rate the leg and room already agreed on and so adds no resampling. A change that did alter the chain's working rate rebuilds the resamplers behind a short fade instead of being refused. The change is staged and takes effect on the next audio block.
+    # The chain to run from now on, replacing whatever is running. Send an empty array to stop all processing. Any change is allowed, including enabling or disabling denoise, which runs at the rate the leg and room already agreed on and so adds no resampling. denoise_gtcrn runs only at 8, 12 or 16 kHz, so in a 48 kHz room it moves the chain to 16 kHz and band-limits the leg to 8 kHz. A change that did alter the chain's working rate rebuilds the resamplers behind a short fade instead of being refused. The change is staged and takes effect on the next audio block.
     filters: list[FilterSpec]
 
 
@@ -500,6 +502,10 @@ class TransferRequest(BaseModel):
     target: str
     # ID of an existing connected SIP leg whose dialog should be replaced (attended transfer). Omit for blind transfer.
     replaces_leg_id: str | None = None
+    # SIP headers to carry to the transfer target, embedded as URI headers in the Refer-To (RFC 3261 §19.1.1), e.g. `<sip:bob@example.com?User-to-User=...>`; the peer copies them into the INVITE it sends to the target. Values are percent-encoded for you. Whether a peer honours them is peer-specific. Dialog and routing headers (RFC 3261 §19.1.5), `body` and `Replaces` are rejected — use `replaces_leg_id` for attended transfer.
+    refer_to_headers: dict[str, str] | None = None
+    # SIP headers to set on the REFER request itself, read by the peer that receives the REFER. A `Referred-By` given here replaces the default one. `Refer-To`, `Contact` and the dialog and routing headers are rejected.
+    headers: dict[str, str] | None = None
 
 
 class UpdateLegStreamRequest(BaseModel):
@@ -542,6 +548,14 @@ class VolumeRequest(BaseModel):
 
     # Volume adjustment (-8 to 8, ~3dB per step, 0 = unchanged)
     volume: int
+
+
+class WebRTCICERestartRequest(BaseModel):
+    """WebRTCICERestartRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    sdp: str
 
 
 class WebRTCOfferRequest(BaseModel):
@@ -659,7 +673,7 @@ class FilterSpec(BaseModel):
 
     # Filter name.
     type: str
-    # Filter parameters as name/value pairs. Unknown names are ignored; out-of-range values are rejected. bandpass takes low_hz (default 300) and high_hz (default 3400); gain takes volume (-8 to 8, ~3 dB per step); pitch takes semitones (-12 to 12, default -5) and mix (0-1, default 1); robotic takes pitch_hz (50-500, default 110), depth (0-0.95, default 0.75) and mix (0-1, default 1); vocoder takes carrier_hz (40-400, default 110), bands (4-32, default 20) and mix (0-1, default 1); denoise takes none.
+    # Filter parameters as name/value pairs. Unknown names are ignored; out-of-range values are rejected. bandpass takes low_hz (default 300) and high_hz (default 3400); gain takes volume (-8 to 8, ~3 dB per step); pitch takes semitones (-12 to 12, default -5) and mix (0-1, default 1); robotic takes pitch_hz (50-500, default 110), depth (0-0.95, default 0.75) and mix (0-1, default 1); vocoder takes carrier_hz (40-400, default 110), bands (4-32, default 20) and mix (0-1, default 1); denoise and denoise_gtcrn take none.
     params: dict[str, float] | None = None
 
 
@@ -668,8 +682,22 @@ class IPIPTrunkSpec(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Static peer SIP URI for IP-IP peering. Reserved; not yet implemented.
-    peer_uri: str | None = None
+    # SIP URI of the peer (e.g. "sip:203.0.113.10:5060" or "sips:sbc.carrier.example:5061"). Outbound calls placed through this trunk are routed here: with a loose `Route` header when the call's Request-URI names another host, and with none when it already targets the peer. Transport is taken from the URI: a "sips:" scheme or a ";transport=tls" parameter selects TLS, ";transport=tcp" selects TCP, otherwise UDP. Any user part is ignored. When the host is an IP literal it is also matched against the source of inbound INVITEs.
+    peer_uri: str
+    # Next-hop SIP proxy for this trunk's outbound INVITEs and OPTIONS pings. When set, the INVITE carries a single loose `Route` naming the proxy, so the peer is only reached if the call's Request-URI names it. Defaults to `SIP_OUTBOUND_PROXY`; when neither is set, requests go straight to `peer_uri`. A proxy is never treated as an inbound source — list its address in `inbound_sources` if the peer's calls arrive through it.
+    outbound_proxy: str | None = None
+    # Optional identity this trunk presents (e.g. "sip:acme@carrier.example"). An outbound call whose `from` matches it, as a full URI or by user-part, is placed through this trunk without naming `trunk_id`; its host becomes the From / P-Asserted-Identity realm when `from` names none. Also used to tell apart several trunks that share an inbound source, by the To header.
+    aor: str | None = None
+    # Digest auth username for outbound INVITEs the peer challenges. Requires `password`. Defaults to the `aor` user-part when a password is set.
+    username: str | None = None
+    # Digest auth password for outbound INVITEs the peer challenges. Optional — omit for a peer that authenticates by source address. Never returned in any response.
+    password: str | None = None
+    # IP addresses and CIDR ranges (IPv4 or IPv6) that inbound INVITEs from this peer arrive from, e.g. ["198.51.100.0/24", "203.0.113.7"]. An inbound call whose source address falls in one is tagged with this trunk's `trunk_id` and inherits its `app_id`; when several trunks match, the longest prefix wins. This is a matching rule, not an access list: calls from other addresses are still accepted. The `peer_uri` host is included automatically when it is an IP literal; hostnames are never resolved. At most 64 entries; a /0 range is rejected.
+    inbound_sources: list[str] | None = None
+    # Seconds between OPTIONS health checks sent to the peer; 0 (the default) disables them. With checks on, the trunk's status follows the peer — `active` when it answers, `failed` when it does not — and `sip.trunk_up` / `sip.trunk_down` are published on each change. Any reply counts as up, including 404 or 405, except 408 and 5xx other than 501; no reply within 5 seconds counts as down. With checks off the trunk stays `active`. Status is informational: calls are attempted on a `failed` trunk too.
+    options_ping_interval_seconds: int | None = None
+    # Accept this trunk's next-hop certificate without verifying it, for a `sips:` / `;transport=tls` peer or outbound proxy whose certificate is self-signed or privately signed. Scoped to that peer's hostname — every other TLS peer is still verified in full. Ignored (with a logged warning) when the next hop is not TLS or is named by IP literal; use `SIP_TLS_CA_FILE` or `SIP_TLS_INSECURE_SKIP_VERIFY` there.
+    tls_insecure_skip_verify: bool | None = None
 
 
 class IPIPTrunkView(BaseModel):
@@ -677,7 +705,15 @@ class IPIPTrunkView(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    peer_uri: str | None = None
+    peer_uri: str
+    outbound_proxy: str | None = None
+    aor: str | None = None
+    username: str | None = None
+    inbound_sources: list[str]
+    options_ping_interval_seconds: int | None = None
+    last_ping_at: str | None = None
+    last_ping_status_code: int | None = None
+    tls_insecure_skip_verify: bool | None = None
 
 
 class LegStreamView(BaseModel):

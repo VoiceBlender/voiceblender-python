@@ -58,6 +58,8 @@ class WebhookEventType(str, Enum):
     LEG_HOLD = "leg.hold"
     LEG_UNHOLD = "leg.unhold"
     LEG_COMMAND_FAILED = "leg.command_failed"
+    LEG_ICE_INTERRUPTED = "leg.ice_interrupted"
+    LEG_ICE_RESTORED = "leg.ice_restored"
     LEG_STREAM_ADDED = "leg.stream_added"
     LEG_STREAM_REMOVED = "leg.stream_removed"
     LEG_STREAM_REJECTED = "leg.stream_rejected"
@@ -111,6 +113,8 @@ class WebhookEventType(str, Enum):
     SIP_OUTBOUND_REGISTRATION_ACTIVE = "sip.outbound_registration_active"
     SIP_OUTBOUND_REGISTRATION_FAILED = "sip.outbound_registration_failed"
     SIP_OUTBOUND_REGISTRATION_EXPIRED = "sip.outbound_registration_expired"
+    SIP_TRUNK_UP = "sip.trunk_up"
+    SIP_TRUNK_DOWN = "sip.trunk_down"
 
 
 class Leg(BaseModel):
@@ -140,9 +144,9 @@ class Leg(BaseModel):
     role: str | None = None
     # Application identifier for event stream filtering.
     app_id: str | None = None
-    # Deprecated: X-* headers from the inbound INVITE. Only present on sip_inbound legs. Use `headers` for new code; it carries the same map plus surfaces handshake headers for websocket legs.
+    # Deprecated: X-/P- headers from the inbound INVITE. Only present on sip_inbound legs. Use `headers` for new code; it carries the same map plus surfaces handshake headers for websocket legs.
     sip_headers: dict[str, str] | None = None
-    # Custom protocol headers exposed by the leg's transport — X-/P- headers from a SIP INVITE, the WebSocket upgrade request, or supplied at outbound dial time.
+    # Custom protocol headers exposed by the leg's transport — X-/P- headers from a SIP INVITE, the WebSocket upgrade request, or supplied at outbound dial time. On an inbound INVITE the prefix is matched in any case and names are reported as received.
     headers: dict[str, str] | None = None
     # Opaque application JSON attached to the leg. Any JSON value is accepted (object, array, string, number, boolean). It is echoed on the leg view and carried at the top level of every event published for this leg, so external state can be correlated without keeping a leg_id lookup table. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited).
     custom_data: Any = None

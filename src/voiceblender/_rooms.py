@@ -74,7 +74,10 @@ Client.get_room = _client_get_room  # type: ignore[method-assign]
 
 
 async def _room_delete(self: Room) -> StatusResponse:
-    """Delete a room"""
+    """Delete a room
+
+    Hangs up every participant. Outbound SIP legs created with this room's `room_id` that are still ringing, and so not participants yet, are cancelled too. Each affected leg emits `leg.disconnected` with reason `room_deleted`.
+    """
     if self._client is None:
         raise RuntimeError(f"{type(self).__name__} not bound to a Client")
     out = await self._client._do("DELETE", f"/rooms/{self.id}", out_model=StatusResponse)

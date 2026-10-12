@@ -40,7 +40,7 @@ class LegRingingEvent(Event):
     from_: str | None = Field(default=None, alias="from")
     # Callee URI (inbound only)
     to: str | None = None
-    # X-* custom SIP headers, if present
+    # X-/P- custom SIP headers (matched in any case, keyed as received), if present
     sip_headers: dict[str, str] | None = None
     offered_codecs: list[OfferedCodec] | None = None
     trunk_id: str | None = None
@@ -78,7 +78,7 @@ class LegDisconnectedEventCdr(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Disconnect reason. Common SIP failures are mapped to named reasons; unmapped 4xx/5xx/6xx codes appear as sip_{code}. This is an open set — treat an unrecognized value as a new reason rather than an error. Known values: api_hangup, room_deleted, remote_bye, caller_cancel, max_duration, session_expired, rtp_timeout, busy, declined, rejected, unavailable, not_found, forbidden, server_error, ring_timeout, unauthorized, timeout, cancelled, not_acceptable, service_unavailable, invite_failed, connect_failed, challenged, transfer_completed, transfer_originate_failed, transfer_connect_failed, bad_answer, siprec_answer_failed, mixer_panic, hangup, peer_slow, connection_reset, ws_error, ws_dial_failed, moq_error, ice_failure, ice_failed, ice_disconnected, livekit_client_initiated, livekit_duplicate_identity, livekit_server_shutdown, livekit_kicked, livekit_room_deleted, livekit_state_mismatch, livekit_join_failure, livekit_migration, livekit_signal_close, livekit_room_closed, livekit_user_unavailable, livekit_user_rejected, livekit_token_expired, livekit_media_failure, livekit_disconnected, livekit_client_closed, livekit_signal_closed, livekit_signal_error, livekit_pc_setup_failed, livekit_add_track_failed, livekit_publisher_failed, livekit_subscriber_failed, livekit_signal_loop_exit, livekit_set_remote_desc_failed, livekit_create_answer_failed, livekit_set_local_desc_failed, livekit_signal_send_failed, livekit_set_publisher_remote_failed, livekit_participant_left.
+    # Disconnect reason. Common SIP failures are mapped to named reasons; unmapped 4xx/5xx/6xx codes appear as sip_{code}. This is an open set — treat an unrecognized value as a new reason rather than an error. Known values: api_hangup, room_deleted, remote_bye, caller_cancel, max_duration, session_expired, rtp_timeout, busy, declined, rejected, unavailable, not_found, forbidden, server_error, ring_timeout, unauthorized, timeout, cancelled, not_acceptable, service_unavailable, invite_failed, connect_failed, challenged, transfer_completed, transfer_originate_failed, transfer_connect_failed, bad_answer, siprec_answer_failed, mixer_panic, hangup, peer_slow, connection_reset, ws_error, ws_dial_failed, moq_error, ice_failure, ice_failed, ice_disconnected, peer_closed, dtls_failed, livekit_client_initiated, livekit_duplicate_identity, livekit_server_shutdown, livekit_kicked, livekit_room_deleted, livekit_state_mismatch, livekit_join_failure, livekit_migration, livekit_signal_close, livekit_room_closed, livekit_user_unavailable, livekit_user_rejected, livekit_token_expired, livekit_media_failure, livekit_disconnected, livekit_client_closed, livekit_signal_closed, livekit_signal_error, livekit_pc_setup_failed, livekit_add_track_failed, livekit_publisher_failed, livekit_subscriber_failed, livekit_signal_loop_exit, livekit_set_remote_desc_failed, livekit_create_answer_failed, livekit_set_local_desc_failed, livekit_signal_send_failed, livekit_set_publisher_remote_failed, livekit_participant_left.
     reason: str
     # Seconds from leg creation to disconnect
     duration_total: float
@@ -209,6 +209,30 @@ class LegCommandFailedEvent(Event):
     app_id: str | None = None
     command: str | None = None
     error: str | None = None
+
+
+class LegICEInterruptedEvent(Event):
+    """Fired when: webRTC leg lost ICE connectivity; the leg is kept so the peer can restart ICE"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Leg identifier
+    leg_id: str | None = None
+    app_id: str | None = None
+    # Leg type; always "webrtc"
+    leg_type: str | None = None
+
+
+class LegICERestoredEvent(Event):
+    """Fired when: webRTC leg regained ICE connectivity after leg.ice_interrupted"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Leg identifier
+    leg_id: str | None = None
+    app_id: str | None = None
+    # Leg type; always "webrtc"
+    leg_type: str | None = None
 
 
 class LegStreamAddedEvent(Event):
@@ -1025,6 +1049,32 @@ class SIPOutboundRegistrationExpiredEvent(Event):
     reason: str | None = None
 
 
+class SIPTrunkUpEvent(Event):
+    """Fired when: sIP trunk peer answered its OPTIONS health check (first answer, or recovery after sip.trunk_down)"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    app_id: str | None = None
+    trunk_id: str | None = None
+    trunk_type: str | None = None
+    peer_uri: str | None = None
+    status_code: int | None = None
+    reason: str | None = None
+
+
+class SIPTrunkDownEvent(Event):
+    """Fired when: sIP trunk peer failed its OPTIONS health check (no reply, transport error, 408, or 5xx other than 501)"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    app_id: str | None = None
+    trunk_id: str | None = None
+    trunk_type: str | None = None
+    peer_uri: str | None = None
+    status_code: int | None = None
+    reason: str | None = None
+
+
 _EVENT_TYPES: dict[str, type[Event]] = {
     "leg.ringing": LegRingingEvent,
     "leg.early_media": LegEarlyMediaEvent,
@@ -1039,6 +1089,8 @@ _EVENT_TYPES: dict[str, type[Event]] = {
     "leg.hold": LegHoldEvent,
     "leg.unhold": LegUnholdEvent,
     "leg.command_failed": LegCommandFailedEvent,
+    "leg.ice_interrupted": LegICEInterruptedEvent,
+    "leg.ice_restored": LegICERestoredEvent,
     "leg.stream_added": LegStreamAddedEvent,
     "leg.stream_removed": LegStreamRemovedEvent,
     "leg.stream_rejected": LegStreamRejectedEvent,
@@ -1092,6 +1144,8 @@ _EVENT_TYPES: dict[str, type[Event]] = {
     "sip.outbound_registration_active": SIPOutboundRegistrationActiveEvent,
     "sip.outbound_registration_failed": SIPOutboundRegistrationFailedEvent,
     "sip.outbound_registration_expired": SIPOutboundRegistrationExpiredEvent,
+    "sip.trunk_up": SIPTrunkUpEvent,
+    "sip.trunk_down": SIPTrunkDownEvent,
 }
 
 
