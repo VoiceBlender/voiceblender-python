@@ -60,7 +60,7 @@ Client.list_legs = _client_list_legs  # type: ignore[method-assign]
 async def _client_create_leg(self: Client, req: CreateLegRequest) -> Leg:
     """Originate an outbound leg
 
-    Originate a new outbound leg. The `type` field selects the transport: `sip` originates a SIP INVITE; `whatsapp` originates a WhatsApp call through Meta; `websocket` dials a remote WebSocket endpoint (audio is PCM in either binary or `json_base64` framing, with bidirectional text and caller-supplied X-/P- headers). For `sip` legs, `outbound_proxy` sets the next hop for this INVITE as a loose `Route` header, leaving the Request-URI unchanged. It outranks the matched trunk's `outbound_proxy` and `SIP_OUTBOUND_PROXY`; a `to` that resolves to an AOR registered to this server outranks all three and is delivered to the bound contact.
+    Originate a new outbound leg. The `type` field selects the transport: `sip` originates a SIP INVITE; `whatsapp` originates a WhatsApp call through Meta; `websocket` dials a remote WebSocket endpoint (audio is PCM in either binary or `json_base64` framing, with bidirectional text and caller-supplied X-/P- headers). For `sip` legs, `outbound_proxy` sets the next hop for this INVITE as a loose `Route` header, leaving the Request-URI unchanged. It outranks the matched trunk's `outbound_proxy` and `SIP_OUTBOUND_PROXY`; a `to` that resolves to an AOR registered to this server outranks all three and is delivered to the bound contact. `trunk_id` places a `sip` leg through a specific SIP trunk; it takes precedence over selecting a trunk by matching `from` against trunk AORs.
     """
     out = await self._do("POST", "/legs", body=req, out_model=Leg)
     if out is not None:
@@ -103,7 +103,7 @@ async def _leg_hangup(self: Leg, req: DeleteLegRequest) -> StatusResponse:
 
     Validates the leg exists and queues a hangup. The HTTP call returns 202 as soon as the leg is found; the SIP work and cleanup run in the background, and the eventual disconnection is observed via the `leg.disconnected` event.
 
-    Without a request body the legacy behavior is preserved: SIP BYE on connected legs (`cdr.reason: "api_hangup"`), or dialog cancel on unanswered inbound legs (`cdr.reason: "caller_cancel"`).
+    Without a request body the leg ends with `cdr.reason: "api_hangup"`: SIP BYE on connected legs, or, on unanswered inbound legs, the INVITE is dropped without any final SIP response.
 
     With `{"reason": "<value>"}` and an unanswered SIP inbound leg (state `ringing` or `early_media`), VoiceBlender sends a final non-2xx response instead of BYE/cancel: `busy`→486, `declined`/`rejected`→603, `unavailable`→480, `not_found`→404, `forbidden`→403, `server_error`→500. The reason value is passed through to `leg.disconnected`'s `cdr.reason`.
 

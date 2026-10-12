@@ -691,6 +691,8 @@ class TransferLegPayload(BaseModel):
     id: str
     target: str
     replaces_leg_id: str | None = None
+    refer_to_headers: dict[str, str] | None = None
+    headers: dict[str, str] | None = None
 
 
 class TransferLegResult(BaseModel):
@@ -716,6 +718,15 @@ class VSIWebRTCAddCandidatePayload(BaseModel):
 
     id: str
     candidate: ICECandidateInit
+
+
+class VSIWebRTCICERestartPayload(BaseModel):
+    """VSIWebRTCICERestartPayload."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    id: str
+    sdp: str
 
 
 # ── VSI command methods on EventStream ────────────────────────────────
@@ -902,6 +913,17 @@ async def _vsi_webrtc_get_candidates(
 
 
 EventStream.webrtc_get_candidates = _vsi_webrtc_get_candidates  # type: ignore[method-assign]
+
+
+async def _vsi_webrtc_ice_restart(
+    self: EventStream, payload: VSIWebRTCICERestartPayload
+) -> WebRTCOfferResult:
+    """Restart ICE on a WebRTC leg"""
+    out = await self._call("webrtc_ice_restart", payload, result_model=WebRTCOfferResult)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.webrtc_ice_restart = _vsi_webrtc_ice_restart  # type: ignore[method-assign]
 
 
 async def _vsi_list_rooms(self: EventStream) -> list[Room]:
@@ -1676,7 +1698,7 @@ EventStream.reject_registration = _vsi_reject_registration  # type: ignore[metho
 async def _vsi_create_sip_trunk(
     self: EventStream, payload: CreateTrunkRequest
 ) -> CreateTrunkResponse:
-    """Create an outbound SIP trunk (REGISTER or static peering)"""
+    """Create a SIP trunk (REGISTER or static peering)"""
     out = await self._call("create_sip_trunk", payload, result_model=CreateTrunkResponse)
     return out  # type: ignore[no-any-return]
 
@@ -1703,7 +1725,7 @@ EventStream.get_sip_trunk = _vsi_get_sip_trunk  # type: ignore[method-assign]
 
 
 async def _vsi_delete_sip_trunk(self: EventStream, payload: IDPayload) -> VSIStatusResponse:
-    """Unregister and remove a SIP trunk"""
+    """Remove a SIP trunk"""
     out = await self._call("delete_sip_trunk", payload, result_model=VSIStatusResponse)
     return out  # type: ignore[no-any-return]
 

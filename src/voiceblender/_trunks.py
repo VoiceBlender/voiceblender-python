@@ -31,9 +31,9 @@ Client.list_sip_trunks = _client_list_sip_trunks  # type: ignore[method-assign]
 
 
 async def _client_create_sip_trunk(self: Client, req: CreateTrunkRequest) -> CreateTrunkResponse:
-    """Create an outbound SIP trunk (REGISTER or static peering)
+    """Create a SIP trunk (REGISTER or static peering)
 
-    Creates a typed SIP trunk. For `type: "sip_register"`, VoiceBlender begins REGISTERing to the supplied registrar URI with digest auth, refreshes before expiry, and routes inbound INVITEs that arrive on that peer's socket plus outbound INVITEs whose `from` matches the AOR through the trunk. Set `sip_register.outbound_proxy` to send both the REGISTER and those INVITEs via a next-hop proxy instead of straight at the registrar; the Request-URI and digest authentication still target `registrar_uri`. It defaults to `SIP_OUTBOUND_PROXY` and is resolved at creation time, so the trunk snapshot reports the hop actually in effect. For `type: "ip_ip"`, returns 501 (reserved, not yet implemented).
+    Creates a typed SIP trunk. For `type: "sip_register"`, VoiceBlender begins REGISTERing to the supplied registrar URI with digest auth, refreshes before expiry, and routes inbound INVITEs that arrive on that peer's socket plus outbound INVITEs whose `from` matches the AOR through the trunk. Set `sip_register.outbound_proxy` to send both the REGISTER and those INVITEs via a next-hop proxy instead of straight at the registrar; the Request-URI and digest authentication still target `registrar_uri`. It defaults to `SIP_OUTBOUND_PROXY` and is resolved at creation time, so the trunk snapshot reports the hop actually in effect. For `type: "ip_ip"`, VoiceBlender peers with a fixed upstream without registering: the trunk is `active` at once, outbound INVITEs placed through it (by `trunk_id` on POST /v1/legs, or by a `from` matching `ip_ip.aor`) are routed at `ip_ip.peer_uri` with the trunk's optional digest credentials, and inbound INVITEs whose source address falls in `ip_ip.inbound_sources` are tagged with the trunk. Set `ip_ip.options_ping_interval_seconds` to health-check the peer with OPTIONS and receive `sip.trunk_up` / `sip.trunk_down` events.
     """
     out = await self._do("POST", "/sip/trunks", body=req, out_model=CreateTrunkResponse)
     assert out is not None, "createSIPTrunk" + ": empty response"
@@ -54,9 +54,9 @@ Client.get_sip_trunk = _client_get_sip_trunk  # type: ignore[method-assign]
 
 
 async def _client_delete_sip_trunk(self: Client, id: str) -> StatusResponse:
-    """Unregister and remove a SIP trunk
+    """Remove a SIP trunk
 
-    Returns 202 Accepted; the unregister (REGISTER with Expires: 0) and final removal run asynchronously.
+    Returns 202 Accepted; teardown and final removal run asynchronously. A `sip_register` trunk unregisters first (REGISTER with Expires: 0); an `ip_ip` trunk only stops its OPTIONS health check, and nothing is sent to the peer.
     """
     out = await self._do("DELETE", f"/sip/trunks/{id}", out_model=StatusResponse)
     return out if out is not None else StatusResponse(status="ok")

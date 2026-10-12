@@ -7,7 +7,12 @@ from __future__ import annotations
 
 from voiceblender._client import Client
 from voiceblender._models import Leg, Room
-from voiceblender._requests import ICECandidateInit, WebRTCOfferRequest
+from voiceblender._requests import (
+    ICECandidateInit,
+    WebRTCICERestartRequest,
+    WebRTCOfferRequest,
+    WebRTCOfferResult,
+)
 from voiceblender._responses import StatusResponse
 from voiceblender._responses_extra import ICECandidatesResponse, WebRTCOfferResponse
 
@@ -41,6 +46,23 @@ async def _leg_add_ice_candidate(self: Leg, req: ICECandidateInit) -> StatusResp
 
 
 Leg.add_ice_candidate = _leg_add_ice_candidate  # type: ignore[method-assign]
+
+
+async def _leg_restart_ice(self: Leg, req: WebRTCICERestartRequest) -> WebRTCOfferResult:
+    """Restart ICE on a WebRTC leg
+
+    Applies a new SDP offer carrying fresh ICE credentials (browser `restartIce()`) to the existing leg and returns the answer. The leg id, media session and room membership are kept. Trickle the new candidates through `/legs/{id}/ice-candidates` after the answer arrives.
+    """
+    if self._client is None:
+        raise RuntimeError(f"{type(self).__name__} not bound to a Client")
+    out = await self._client._do(
+        "POST", f"/legs/{self.id}/ice-restart", body=req, out_model=WebRTCOfferResult
+    )
+    assert out is not None, "restartICE" + ": empty response"
+    return out
+
+
+Leg.restart_ice = _leg_restart_ice  # type: ignore[method-assign]
 
 
 async def _client_webrtc_offer(self: Client, req: WebRTCOfferRequest) -> WebRTCOfferResponse:
