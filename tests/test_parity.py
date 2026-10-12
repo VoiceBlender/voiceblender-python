@@ -157,6 +157,27 @@ def test_every_component_schema_has_a_class() -> None:
     assert not missing, f"schemas with no exported class: {sorted(missing)}"
 
 
+def test_requests_exports_are_generated() -> None:
+    """``_requests.__all__`` lists every class the module declares, and the
+    package re-exports all of it.
+
+    That list is written by the generator and ``__init__.py`` star-imports it,
+    so no export list needs editing when the spec gains a schema. Before this,
+    ``__init__.py`` named each class by hand and a release shipped a request
+    type (``WebRTCICERestartRequest``) that ``voiceblender.<Class>`` didn't
+    resolve.
+    """
+    from voiceblender import _requests
+
+    declared = {
+        name
+        for name, obj in vars(_requests).items()
+        if isinstance(obj, type) and obj.__module__ == _requests.__name__
+    }
+    assert set(_requests.__all__) == declared
+    assert declared <= set(voiceblender.__all__)
+
+
 def test_no_class_is_declared_twice() -> None:
     """A schema in both specs is emitted once and imported, never redeclared."""
     src = Path(__file__).resolve().parents[1] / "src" / "voiceblender"
