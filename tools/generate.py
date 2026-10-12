@@ -486,6 +486,9 @@ GENERATED_HEADER = (
 )
 
 
+_CLASS_DECL_RE = re.compile(r"class (\w+)[(:]")
+
+
 class Emitter:
     """Helper that buffers generated source for one output file."""
 
@@ -510,6 +513,13 @@ class Emitter:
 
     def lines(self, *ls: str) -> None:
         self._body.extend(ls)
+
+    def prepend(self, *ls: str) -> None:
+        self._body[:0] = ls
+
+    def declared_classes(self) -> list[str]:
+        """Names of the top-level classes emitted so far, in emission order."""
+        return [m.group(1) for s in self._body if (m := _CLASS_DECL_RE.match(s))]
 
     def finalize(self) -> str:
         head = [GENERATED_HEADER]
@@ -969,6 +979,14 @@ def gen_requests(schemas: dict[str, dict[str, Any]]) -> str:
     e.line("    username_fragment: Optional[str] = Field(default=None, alias='usernameFragment')")
     e.line("")
     e.line("")
+
+    # Everything declared here is public. ``__init__.py`` star-imports this
+    # module and extends its own ``__all__`` from this one, so a schema added
+    # to the spec reaches ``voiceblender.<Class>`` without a hand-maintained
+    # export list. Go needs no equivalent: its SDK is a single package, so every
+    # generated type is exported the moment it is emitted.
+    exported = sorted(e.declared_classes())
+    e.prepend("__all__ = [", *(f'    "{name}",' for name in exported), "]", "", "")
 
     return e.finalize()
 

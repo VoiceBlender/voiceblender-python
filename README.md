@@ -63,7 +63,11 @@ make generate   # regenerate from openapi.yaml + asyncapi.yaml
 make test       # run pytest
 make lint       # ruff check
 make typecheck  # mypy --strict
+make check      # lint + typecheck + test
 ```
+
+`make install-dev` (or `make install-hooks`) enables the pre-commit hook in
+`.githooks/`, which runs `make check` before every commit.
 
 ## License
 

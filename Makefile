@@ -6,7 +6,7 @@ ASYNCAPI     := $(VOICEBLENDER)/asyncapi.yaml
 
 PY ?= python3
 
-.PHONY: generate lint format typecheck test build package release-check publish publish-test install-dev clean
+.PHONY: generate lint format typecheck test check build package release-check publish publish-test install-dev install-hooks clean
 
 # generate reads openapi.yaml + asyncapi.yaml and rewrites the generated files
 # (_models.py, _requests.py, _responses.py, _events.py, _legs.py, _rooms.py,
@@ -29,6 +29,10 @@ typecheck:
 test:
 	pytest -q
 
+# check is everything that must pass before a commit or a release: the
+# pre-commit hook (.githooks/pre-commit) and `make package` both run it.
+check: lint typecheck test
+
 build:
 	$(PY) -m build
 
@@ -39,7 +43,7 @@ build:
 #
 # The version is not in pyproject.toml — hatch-vcs derives it from the git tag,
 # so `git tag -a v1.2.3 -m ...` is the whole version bump.
-package: lint typecheck test
+package: check
 	rm -rf dist
 	$(PY) -m build
 	$(PY) -m twine check dist/*
@@ -80,8 +84,14 @@ publish: package release-check
 publish-test: package release-check
 	$(PY) -m twine upload --repository testpypi dist/*
 
-install-dev:
+install-dev: install-hooks
 	$(PY) -m pip install -e ".[dev]"
+
+# install-hooks points git at the tracked hooks in .githooks/, so `make check`
+# runs before every commit. It is a per-clone setting (git never enables hooks
+# from a checkout on its own), which is why install-dev does it too.
+install-hooks:
+	git config core.hooksPath .githooks
 
 clean:
 	rm -rf build/ dist/ *.egg-info src/voiceblender/__pycache__ tests/__pycache__
