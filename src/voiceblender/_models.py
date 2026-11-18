@@ -115,6 +115,7 @@ class WebhookEventType(str, Enum):
     SIP_OUTBOUND_REGISTRATION_EXPIRED = "sip.outbound_registration_expired"
     SIP_TRUNK_UP = "sip.trunk_up"
     SIP_TRUNK_DOWN = "sip.trunk_down"
+    INSTANCE_STATUS_CHANGED = "instance.status_changed"
 
 
 class Leg(BaseModel):
@@ -126,7 +127,7 @@ class Leg(BaseModel):
     instance_id: str | None = None
     # Unique leg identifier (UUID)
     id: str
-    # Leg type
+    # Leg type. Covers inbound and outbound legs of every transport; `POST /legs` creates only some of them (see `CreateLegRequest.type`).
     type: str
     # Leg state
     state: str

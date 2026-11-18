@@ -78,7 +78,7 @@ class LegDisconnectedEventCdr(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Disconnect reason. Common SIP failures are mapped to named reasons; unmapped 4xx/5xx/6xx codes appear as sip_{code}. This is an open set — treat an unrecognized value as a new reason rather than an error. Known values: api_hangup, room_deleted, remote_bye, caller_cancel, max_duration, session_expired, rtp_timeout, busy, declined, rejected, unavailable, not_found, forbidden, server_error, ring_timeout, unauthorized, timeout, cancelled, not_acceptable, service_unavailable, invite_failed, connect_failed, challenged, transfer_completed, transfer_originate_failed, transfer_connect_failed, bad_answer, siprec_answer_failed, mixer_panic, hangup, peer_slow, connection_reset, ws_error, ws_dial_failed, moq_error, ice_failure, ice_failed, ice_disconnected, peer_closed, dtls_failed, livekit_client_initiated, livekit_duplicate_identity, livekit_server_shutdown, livekit_kicked, livekit_room_deleted, livekit_state_mismatch, livekit_join_failure, livekit_migration, livekit_signal_close, livekit_room_closed, livekit_user_unavailable, livekit_user_rejected, livekit_token_expired, livekit_media_failure, livekit_disconnected, livekit_client_closed, livekit_signal_closed, livekit_signal_error, livekit_pc_setup_failed, livekit_add_track_failed, livekit_publisher_failed, livekit_subscriber_failed, livekit_signal_loop_exit, livekit_set_remote_desc_failed, livekit_create_answer_failed, livekit_set_local_desc_failed, livekit_signal_send_failed, livekit_set_publisher_remote_failed, livekit_participant_left.
+    # Disconnect reason. Common SIP failures are mapped to named reasons; unmapped 4xx/5xx/6xx codes appear as sip_{code}. This is an open set — treat an unrecognized value as a new reason rather than an error. Known values: api_hangup, room_deleted, remote_bye, caller_cancel, max_duration, session_expired, rtp_timeout, server_shutdown, busy, declined, rejected, unavailable, not_found, forbidden, server_error, ring_timeout, unauthorized, timeout, cancelled, not_acceptable, service_unavailable, invite_failed, connect_failed, challenged, transfer_completed, transfer_originate_failed, transfer_connect_failed, bad_answer, siprec_answer_failed, mixer_panic, hangup, peer_slow, connection_reset, ws_error, ws_dial_failed, moq_error, ice_failure, ice_failed, ice_disconnected, peer_closed, dtls_failed, livekit_client_initiated, livekit_duplicate_identity, livekit_server_shutdown, livekit_kicked, livekit_room_deleted, livekit_state_mismatch, livekit_join_failure, livekit_migration, livekit_signal_close, livekit_room_closed, livekit_user_unavailable, livekit_user_rejected, livekit_token_expired, livekit_media_failure, livekit_disconnected, livekit_client_closed, livekit_signal_closed, livekit_signal_error, livekit_pc_setup_failed, livekit_add_track_failed, livekit_publisher_failed, livekit_subscriber_failed, livekit_signal_loop_exit, livekit_set_remote_desc_failed, livekit_create_answer_failed, livekit_set_local_desc_failed, livekit_signal_send_failed, livekit_set_publisher_remote_failed, livekit_participant_left.
     reason: str
     # Seconds from leg creation to disconnect
     duration_total: float
@@ -99,6 +99,8 @@ class LegDisconnectedEventQuality(BaseModel):
     rtp_packets_lost: int
     # Inter-arrival jitter in milliseconds (RFC 3550 §A.8)
     rtp_jitter_ms: float
+    # The audio this server sent, as the peer described it in its RTCP receiver reports. Present only on SIP legs that negotiated RTCP multiplexing (a=rtcp-mux) and whose peer sent at least one report on our stream
+    outbound: dict[str, Any] | None = None
 
 
 class LegDisconnectedEvent(Event):
@@ -1038,7 +1040,7 @@ class SIPOutboundRegistrationFailedEvent(Event):
 
 
 class SIPOutboundRegistrationExpiredEvent(Event):
-    """Fired when: outbound SIP trunk removed (DELETE, shutdown, or refresh failed past granted lifetime)"""
+    """Fired when: outbound SIP trunk removed (DELETE, shutdown, or refresh failed past granted lifetime) or unregistered for a drain"""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -1073,6 +1075,27 @@ class SIPTrunkDownEvent(Event):
     peer_uri: str | None = None
     status_code: int | None = None
     reason: str | None = None
+
+
+class InstanceStatusChangedEvent(Event):
+    """Fired when: instance status changed (starting, ready, draining, drained, stopping); sent to every VSI client whatever its app_id filter"""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Previous status: starting, ready, draining, drained or stopping
+    from_: str | None = Field(default=None, alias="from")
+    # New status: starting, ready, draining, drained or stopping
+    to: str | None = None
+    # Legs on the instance at the change
+    legs: int | None = None
+    # Rooms on the instance at the change
+    rooms: int | None = None
+    # What started the drain: api or signal. Empty when not draining
+    drain_source: str | None = None
+    # True when the process exits once drained (a SIGUSR1 drain)
+    exit_when_drained: bool | None = None
+    # When the drain times out and the ordered shutdown runs (RFC 3339). Absent when there is no limit
+    drain_deadline: str | None = None
 
 
 _EVENT_TYPES: dict[str, type[Event]] = {
@@ -1146,6 +1169,7 @@ _EVENT_TYPES: dict[str, type[Event]] = {
     "sip.outbound_registration_expired": SIPOutboundRegistrationExpiredEvent,
     "sip.trunk_up": SIPTrunkUpEvent,
     "sip.trunk_down": SIPTrunkDownEvent,
+    "instance.status_changed": InstanceStatusChangedEvent,
 }
 
 

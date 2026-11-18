@@ -53,7 +53,24 @@ def load_yaml(path: Path) -> dict[str, Any]:
         data = yaml.load(f)
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected a mapping at the top level")
+    _normalize_nullable(data)
     return data
+
+
+def _normalize_nullable(node: Any) -> None:
+    """Rewrite OpenAPI 3.1 ``type: [T, "null"]`` as 3.0 ``type: T, nullable: true``."""
+    if isinstance(node, dict):
+        t = node.get("type")
+        if isinstance(t, list) and "null" in t:
+            rest = [x for x in t if x != "null"]
+            if len(rest) == 1:
+                node["type"] = rest[0]
+                node["nullable"] = True
+        for v in node.values():
+            _normalize_nullable(v)
+    elif isinstance(node, list):
+        for v in node:
+            _normalize_nullable(v)
 
 
 # ── Naming helpers ────────────────────────────────────────────────────────────
@@ -1953,7 +1970,9 @@ def main() -> int:
     openapi = load_yaml(args.openapi)
     schemas: dict[str, dict[str, Any]] = (openapi.get("components") or {}).get("schemas") or {}
     paths: dict[str, dict[str, Any]] = openapi.get("paths") or {}
-    webhooks: dict[str, dict[str, Any]] = openapi.get("x-webhooks") or {}
+    webhooks: dict[str, dict[str, Any]] = openapi.get("webhooks") or openapi.get("x-webhooks") or {}
+    if not webhooks:
+        sys.exit(f"{args.openapi}: no webhooks found; refusing to emit an empty _events.py")
 
     # Every class _requests.py declares, so _model_module routes references to
     # it (rather than to _models) — the counterpart of gen_requests' loop.

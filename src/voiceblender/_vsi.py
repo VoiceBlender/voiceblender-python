@@ -20,11 +20,13 @@ from voiceblender._requests import (
     CreateTrunkResponse,
     FilterSpec,
     ICECandidateInit,
+    InstanceStatus,
     LegStreamView,
     RegistrationsResponse,
     RoomRoutingView,
     RoutingRowUpdate,
     SIPRECSessionView,
+    StartDrainRequest,
     TrunksListResponse,
     TrunkView,
     WebRTCCandidatesResult,
@@ -1731,3 +1733,21 @@ async def _vsi_delete_sip_trunk(self: EventStream, payload: IDPayload) -> VSISta
 
 
 EventStream.delete_sip_trunk = _vsi_delete_sip_trunk  # type: ignore[method-assign]
+
+
+async def _vsi_start_drain(self: EventStream, payload: StartDrainRequest) -> InstanceStatus:
+    """Start draining: refuse new SIP calls and let current calls end"""
+    out = await self._call("start_drain", payload, result_model=InstanceStatus)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.start_drain = _vsi_start_drain  # type: ignore[method-assign]
+
+
+async def _vsi_cancel_drain(self: EventStream) -> InstanceStatus:
+    """Cancel a drain and accept new calls again"""
+    out = await self._call("cancel_drain", None, result_model=InstanceStatus)
+    return out  # type: ignore[no-any-return]
+
+
+EventStream.cancel_drain = _vsi_cancel_drain  # type: ignore[method-assign]

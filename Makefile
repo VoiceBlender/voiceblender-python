@@ -4,6 +4,13 @@ VOICEBLENDER ?= ../VoiceBlender
 OPENAPI      := $(VOICEBLENDER)/openapi.yaml
 ASYNCAPI     := $(VOICEBLENDER)/asyncapi.yaml
 
+# Prefer the repo's .venv when present, so ruamel.yaml, ruff and mypy resolve
+# without activating it first.
+VENV ?= .venv
+ifneq ($(wildcard $(VENV)/bin/python),)
+PY ?= $(VENV)/bin/python
+export PATH := $(abspath $(VENV))/bin:$(PATH)
+endif
 PY ?= python3
 
 .PHONY: generate lint format typecheck test check build package release-check publish publish-test install-dev install-hooks clean

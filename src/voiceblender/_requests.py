@@ -36,6 +36,7 @@ __all__ = [
     "ICECandidateInit",
     "IPIPTrunkSpec",
     "IPIPTrunkView",
+    "InstanceStatus",
     "LegStreamView",
     "LiveKitParams",
     "LiveKitPermissions",
@@ -65,6 +66,7 @@ __all__ = [
     "SetLegCustomDataRequest",
     "SetLegFiltersRequest",
     "SetLegRoleRequest",
+    "StartDrainRequest",
     "StartSIPRECRequest",
     "TTSRequest",
     "TransferCompleteRequest",
@@ -179,7 +181,7 @@ class CreateLegRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Leg type
+    # Transport to dial out on. WebRTC legs cannot be created here: the browser starts them via `POST /webrtc/offer`.
     type: str
     # Destination. For sip legs, a SIP URI (e.g. "sip:alice@example.com"); a "sips:" URI or a ";transport=tls" param sends the INVITE over TLS, and ";transport=tcp" over TCP. For whatsapp legs, an E.164 phone number (with or without '+').
     to: str | None = None
@@ -221,6 +223,8 @@ class CreateLegRequest(BaseModel):
     filters: list[FilterSpec] | None = None
     # For sip legs: offer Real-Time Text (ITU-T T.140 over RTP per RFC 4103) alongside audio. For websocket legs: enable the bidirectional text-message channel. Default: false.
     rtt: bool | None = None
+    # SIP outbound only. true offers SDES-SRTP (RFC 4568): every audio section, and the text section when rtt is set, goes out as RTP/SAVP with its own a=crypto keys, and a peer that answers without an accepted key fails the call. false offers plain RTP/AVP. Either value holds for the whole call: a later re-offer on the other transport gets 488. Omit to follow SIP_SRTP, which offers SRTP only when it is "required". Rejected with 400 when it contradicts SIP_SRTP (true under "disabled", false under "required"). The keys travel in the SDP, so send the INVITE over TLS (a "sips:" URI or ";transport=tls").
+    srtp: bool | None = None
     # Opaque application JSON attached to the leg. Any JSON value is accepted (object, array, string, number, boolean). It is echoed on the leg view and carried at the top level of every event published for this leg, so external state can be correlated without keeping a leg_id lookup table. Capped by CUSTOM_DATA_MAX_BYTES (default 1024 bytes, 0 = unlimited).
     custom_data: Any = None
     # SIP outbound only. Extra m=audio sections to offer alongside the call's primary bidirectional audio, so a multi-stream call is established by the first INVITE instead of a follow-up re-INVITE. Each entry binds its own RTP port and may be mixed into its own room. To add a stream to a call that is already up, use POST /v1/legs/{id}/streams instead.
@@ -278,6 +282,8 @@ class CreateTrunkRequest(BaseModel):
     type: str
     # Application identifier carried through to every event emitted by this trunk.
     app_id: str | None = None
+    # SDES-SRTP policy for calls through this trunk, in both directions: outbound calls placed through it (by trunk_id or by from) and inbound calls it claims. Takes the SIP_SRTP values and replaces SIP_SRTP for those calls, stricter or looser: required makes every call through the trunk SRTP, disabled keeps it plain RTP even when SIP_SRTP is required. Omit to follow SIP_SRTP. Inbound calls are claimed by source address, which can be forged over UDP; a trunk that relaxes the server policy should use TLS.
+    srtp: str | None = None
     # Required when type == "sip_register". Configures the outbound REGISTER (registrar URI, AOR, digest credentials, expiry).
     sip_register: Any = None
     # Required when type == "ip_ip". Configures static peering with a fixed upstream (peer URI, optional digest credentials, inbound source addresses, OPTIONS health check).
@@ -493,6 +499,14 @@ class SetLegRoleRequest(BaseModel):
 
     # New routing role for the leg. The room's routing matrix decides which other legs this leg hears and is heard by based on roles. Pass an empty string to clear the role (full mesh).
     role: str
+
+
+class StartDrainRequest(BaseModel):
+    """StartDrainRequest."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    timeout_seconds: int | None = None
 
 
 class StartSIPRECRequest(BaseModel):
@@ -790,6 +804,24 @@ class IPIPTrunkView(BaseModel):
     tls_insecure_skip_verify: bool | None = None
 
 
+class InstanceStatus(BaseModel):
+    """InstanceStatus."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    # Instance identifier
+    instance_id: str | None = None
+    status: str
+    version: str | None = None
+    uptime_seconds: int
+    draining_since: str | None = None
+    drain_source: str | None = None
+    exit_when_drained: bool
+    drain_deadline: str | None = None
+    legs: int
+    rooms: int
+
+
 class LegStreamView(BaseModel):
     """LegStreamView."""
 
@@ -817,6 +849,8 @@ class LegStreamView(BaseModel):
     local_port: int | None = None
     # Remote RTP address media is currently sent to.
     remote_addr: str | None = None
+    # True while the stream's media is encrypted with SDES-SRTP (RFC 4568). Omitted for plain RTP, and for an added stream until the peer has answered it.
+    srtp: bool | None = None
     # The stream's a=label value (RFC 4574), for correlating it with external metadata.
     label: str | None = None
     # The stream's a=content value (RFC 4796), e.g. "main" for original audio and "alt" for a translated feed.
@@ -1041,6 +1075,8 @@ class SIPRegisterTrunkSpec(BaseModel):
     expires_seconds: int | None = None
     # Accept this trunk's next-hop certificate without verifying it, for a `sips:` / `;transport=tls` registrar or outbound proxy whose certificate is self-signed, privately signed, or carries no SAN (`x509: certificate relies on legacy Common Name field`). Scoped to that peer's hostname — every other TLS peer is still verified in full, unlike the server-wide `SIP_TLS_INSECURE_SKIP_VERIFY`. Ignored (with a logged warning) when the next hop is not TLS, or when it is named by IP literal: such a dial sends no SNI and cannot be told apart from any other, so use `SIP_TLS_CA_FILE` or `SIP_TLS_INSECURE_SKIP_VERIFY` there. Prefer `SIP_TLS_CA_FILE` when the peer's CA can simply be trusted.
     tls_insecure_skip_verify: bool | None = None
+    # Unregister (REGISTER with Expires: 0) when the instance starts draining, so the provider stops sending new calls here, and register again if the drain is cancelled. Calls already up and new outbound calls through the trunk are not affected. Set false for providers that end live calls, or refuse outbound calls, from a client that is no longer registered. Defaults to true.
+    unregister_on_drain: bool | None = None
 
 
 class SIPRegisterTrunkView(BaseModel):
@@ -1061,6 +1097,7 @@ class SIPRegisterTrunkView(BaseModel):
     cseq: int | None = None
     source_address: str | None = None
     tls_insecure_skip_verify: bool | None = None
+    unregister_on_drain: bool
 
 
 class STTWord(BaseModel):
@@ -1084,6 +1121,7 @@ class TrunkView(BaseModel):
     app_id: str | None = None
     status: str
     last_error: str | None = None
+    srtp: str | None = None
     created_at: str
     sip_register: Any = None
     ip_ip: Any = None
