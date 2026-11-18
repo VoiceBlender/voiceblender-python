@@ -97,6 +97,12 @@ jobs:
           cache: pip
           cache-dependency-path: voiceblender-python/pyproject.toml
 
+      # git describe prefers an annotated tag over the lightweight one
+      # actions/checkout leaves for the triggering tag, so another tag on the
+      # same commit would otherwise name the version.
+      - name: pin version to the tag
+        run: echo "SETUPTOOLS_SCM_PRETEND_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       - name: install
         run: make install-dev
 
